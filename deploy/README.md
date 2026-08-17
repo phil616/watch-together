@@ -95,16 +95,20 @@ id -u movie-sync || sudo useradd --system --home /opt/movie-sync --shell /usr/sb
 # scp 先把二进制上传到 /tmp/movie-sync-watchtogether.new
 sudo mkdir -p /opt/movie-sync /var/lib/watchtogether
 sudo chown movie-sync:movie-sync /opt/movie-sync /var/lib/watchtogether
+
+# 先停止服务，避免覆盖正在运行的二进制时出现 Text file busy
+sudo systemctl stop movie-sync || true
+
 sudo mv -f /tmp/movie-sync-watchtogether.new /opt/movie-sync/watchtogether
 sudo chown movie-sync:movie-sync /opt/movie-sync/watchtogether
 sudo chmod 0755 /opt/movie-sync/watchtogether
-sudo systemctl restart movie-sync
+sudo systemctl start movie-sync
 ```
 
 因此 `DEPLOY_SSH_USER` 对应的用户需要能免密执行这些命令。最小化 sudo 示例（在目标服务器执行 `sudo visudo -f /etc/sudoers.d/movie-sync-deploy`）：
 
 ```text
-deploy ALL=(root) NOPASSWD: /usr/bin/useradd --system --home /opt/movie-sync --shell /usr/sbin/nologin movie-sync, /usr/bin/mkdir -p /opt/movie-sync /var/lib/watchtogether, /usr/bin/chown movie-sync:movie-sync /opt/movie-sync /var/lib/watchtogether, /usr/bin/mv -f /tmp/movie-sync-watchtogether.new /opt/movie-sync/watchtogether, /usr/bin/chown movie-sync:movie-sync /opt/movie-sync/watchtogether, /usr/bin/chmod 0755 /opt/movie-sync/watchtogether, /usr/bin/systemctl restart movie-sync
+deploy ALL=(root) NOPASSWD: /usr/bin/useradd --system --home /opt/movie-sync --shell /usr/sbin/nologin movie-sync, /usr/bin/mkdir -p /opt/movie-sync /var/lib/watchtogether, /usr/bin/chown movie-sync:movie-sync /opt/movie-sync /var/lib/watchtogether, /usr/bin/systemctl stop movie-sync, /usr/bin/mv -f /tmp/movie-sync-watchtogether.new /opt/movie-sync/watchtogether, /usr/bin/chown movie-sync:movie-sync /opt/movie-sync/watchtogether, /usr/bin/chmod 0755 /opt/movie-sync/watchtogether, /usr/bin/systemctl start movie-sync
 ```
 
 如果不想维护最小权限，也可以把 `deploy` 加入 sudo 组并允许 NOPASSWD，但生产环境建议使用上面的最小权限规则。
@@ -130,8 +134,23 @@ deploy ALL=(root) NOPASSWD: /usr/bin/useradd --system --home /opt/movie-sync --s
 工作流会先构建前端（`npm run build`），再构建 Go 二进制，然后：
 
 1. `scp` 上传到目标服务器 `/tmp/movie-sync-watchtogether.new`。
-2. SSH 执行 `mv` 原子替换 `/opt/movie-sync/watchtogether`。
-3. `systemctl restart movie-sync` 使新版本生效。
+2. SSH 先 `systemctl stop movie-sync`，避免替换正在运行的二进制时报 `Text file busy`。
+3. SSH 执行 `mv` 替换 `/opt/movie-sync/watchtogether`。
+4. `systemctl start movie-sync` 启动新版本。
+
+### 如果 systemd 报 `Text file busy` / `status=203/EXEC`
+
+原因是替换二进制时服务仍然在运行，systemd 尝试执行一个正在被写入/替换的文件。现在工作流已经改为“先 stop → 替换 → 再 start”。
+
+如果服务器当前已经处于失败循环，可手动修复：
+
+```bash
+sudo systemctl stop movie-sync
+sudo mv -f /tmp/movie-sync-watchtogether.new /opt/movie-sync/watchtogether
+sudo chown movie-sync:movie-sync /opt/movie-sync/watchtogether
+sudo chmod 0755 /opt/movie-sync/watchtogether
+sudo systemctl start movie-sync
+```
 
 ### 如果部署卡在 SSH 步骤
 

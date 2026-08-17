@@ -91,4 +91,4 @@ jobs:
               -o ConnectTimeout=15 \
               -o StrictHostKeyChecking=accept-new \
               "$SSH_USER@$SSH_HOST" \
-              "set -e; id -u movie-sync >/dev/null 2>&1 || sudo useradd --system --home '$APP_DIR' --shell /usr/sbin/nologin movie-sync; sudo mkdir -p '$APP_DIR' /var/lib/watchtogether && sudo chown movie-sync:movie-sync '$APP_DIR' /var/lib/watchtogether && sudo mv -f '$REMOTE_TMP' '$APP_DIR/watchtogether' && sudo chown movie-sync:movie-sync '$APP_DIR/watchtogether' && sudo chmod 0755 '$APP_DIR/watchtogether' && sudo systemctl restart '$SERVICE_NAME'"
+              "set -e; id -u movie-sync >/dev/null 2>&1 || sudo useradd --system --home '$APP_DIR' --shell /usr/sbin/nologin movie-sync; sudo mkdir -p '$APP_DIR' /var/lib/watchtogether && sudo chown movie-sync:movie-sync '$APP_DIR' /var/lib/watchtogether && sudo systemctl stop '$SERVICE_NAME' >/dev/null 2>&1 || true; sudo mv -f '$REMOTE_TMP' '$APP_DIR/watchtogether' && sudo chown movie-sync:movie-sync '$APP_DIR/watchtogether' && sudo chmod 0755 '$APP_DIR/watchtogether' && sudo systemctl start '$SERVICE_NAME'"
