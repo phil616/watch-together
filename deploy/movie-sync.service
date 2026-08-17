@@ -1,0 +1,25 @@
+[Unit]
+Description=Movie Sync (远程放映室)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=movie-sync
+Group=movie-sync
+WorkingDirectory=/opt/movie-sync
+EnvironmentFile=/opt/movie-sync/.env
+ExecStart=/opt/movie-sync/watchtogether serve
+Restart=always
+RestartSec=5s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/watchtogether
+
+[Install]
+WantedBy=multi-user.target

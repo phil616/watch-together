@@ -1,0 +1,94 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Go dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: web
+        run: npm run build
+
+      - name: Build Go binary
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o watchtogether ./cmd/watchtogether
+
+      - name: Deploy via SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+          SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          APP_DIR: ${{ vars.DEPLOY_APP_DIR }}
+          SERVICE_NAME: ${{ vars.DEPLOY_SERVICE_NAME }}
+        run: |
+          set -euo pipefail
+
+          : "${SSH_HOST:?DEPLOY_SSH_HOST is required}"
+          : "${SSH_USER:?DEPLOY_SSH_USER is required}"
+          : "${SSH_KEY:?DEPLOY_SSH_KEY is required}"
+          : "${SSH_PORT:=22}"
+          : "${APP_DIR:=/opt/movie-sync}"
+          : "${SERVICE_NAME:=movie-sync}"
+
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+
+          REMOTE_TMP="/tmp/movie-sync-watchtogether.new"
+
+          scp -i "$HOME/.ssh/deploy_key" \
+              -P "$SSH_PORT" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o StrictHostKeyChecking=accept-new \
+              watchtogether "$SSH_USER@$SSH_HOST:$REMOTE_TMP"
+
+          ssh -i "$HOME/.ssh/deploy_key" \
+              -p "$SSH_PORT" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o StrictHostKeyChecking=accept-new \
+              "$SSH_USER@$SSH_HOST" \
+              "set -e; id -u movie-sync >/dev/null 2>&1 || sudo useradd --system --home '$APP_DIR' --shell /usr/sbin/nologin movie-sync; sudo mkdir -p '$APP_DIR' /var/lib/watchtogether && sudo chown movie-sync:movie-sync '$APP_DIR' /var/lib/watchtogether && sudo mv -f '$REMOTE_TMP' '$APP_DIR/watchtogether' && sudo chown movie-sync:movie-sync '$APP_DIR/watchtogether' && sudo chmod 0755 '$APP_DIR/watchtogether' && sudo systemctl restart '$SERVICE_NAME'"

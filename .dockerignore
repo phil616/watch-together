@@ -1,0 +1,16 @@
+.git
+.codegraph
+.cursor
+.env
+data
+watchtogether
+web/node_modules
+web/test-results
+web/playwright-report
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
+DESIGN.md
+*.db
+*.db-shm
+*.db-wal
