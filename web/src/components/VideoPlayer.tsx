@@ -14,6 +14,71 @@ const format = (ms: number) => {
     ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
     : `${m}:${String(s).padStart(2, "0")}`;
 };
+
+type WebKitFullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+type WebKitFullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+type WebKitFullscreenVideo = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+};
+
+/** Toggle the custom player fullscreen, with native iPhone video as fallback. */
+export async function togglePlayerFullscreen(
+  player: HTMLElement,
+  video?: HTMLVideoElement | null,
+) {
+  const fullscreenDocument = document as WebKitFullscreenDocument;
+  if (
+    fullscreenDocument.fullscreenElement ||
+    fullscreenDocument.webkitFullscreenElement
+  ) {
+    try {
+      if (fullscreenDocument.exitFullscreen)
+        await fullscreenDocument.exitFullscreen();
+      else await fullscreenDocument.webkitExitFullscreen?.();
+    } catch {
+      // The browser owns fullscreen state; a failed exit needs no local repair.
+    }
+    return;
+  }
+
+  try {
+    if (
+      fullscreenDocument.fullscreenEnabled !== false &&
+      player.requestFullscreen
+    ) {
+      await player.requestFullscreen({ navigationUI: "hide" });
+      return;
+    }
+
+    const webkitPlayer = player as WebKitFullscreenElement;
+    if (webkitPlayer.webkitRequestFullscreen) {
+      await webkitPlayer.webkitRequestFullscreen();
+      return;
+    }
+  } catch {
+    // Some WebKit versions expose element fullscreen but reject it on iPhone.
+  }
+
+  if (!video) return;
+  const webkitVideo = video as WebKitFullscreenVideo;
+  try {
+    if (webkitVideo.webkitEnterFullscreen) {
+      webkitVideo.webkitEnterFullscreen();
+      return;
+    }
+    await video.requestFullscreen?.({ navigationUI: "hide" });
+  } catch {
+    // Fullscreen is best-effort and can be denied by browser or system policy.
+  }
+}
+
 /** Player controls, video element, danmaku overlay, and sync status pill. */
 export function VideoPlayer({
   src,
@@ -206,9 +271,8 @@ export function VideoPlayer({
           className="ghost small fullscreen-button"
           type="button"
           onClick={() => {
-            if (playerRef.current?.requestFullscreen)
-              void playerRef.current.requestFullscreen();
-            else void ref.current?.requestFullscreen?.();
+            if (playerRef.current)
+              void togglePlayerFullscreen(playerRef.current, ref.current);
           }}
           aria-label="全屏"
         >
