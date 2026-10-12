@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlaybackState } from "../realtime/protocol";
 import type { ChatMessage } from "../types";
 import type { SyncController, SyncStatus } from "../player/SyncController";
@@ -56,7 +56,11 @@ export async function togglePlayerFullscreen(
       await player.requestFullscreen({ navigationUI: "hide" });
       return;
     }
+  } catch {
+    // Try the prefixed API before falling back to native video fullscreen.
+  }
 
+  try {
     const webkitPlayer = player as WebKitFullscreenElement;
     if (webkitPlayer.webkitRequestFullscreen) {
       await webkitPlayer.webkitRequestFullscreen();
@@ -106,8 +110,44 @@ export function VideoPlayer({
   onMediaError?: () => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<HTMLElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const revealControls = useCallback(() => {
+    clearTimeout(hideTimer.current);
+    setControlsVisible(true);
+    if (isFullscreen) {
+      hideTimer.current = setTimeout(() => {
+        // Keyboard users must not lose the control they are operating.
+        if (controlsRef.current?.querySelector(":focus-visible")) return;
+        setControlsVisible(false);
+      }, 3000);
+    }
+  }, [isFullscreen]);
+  useEffect(() => {
+    const updateFullscreen = () => {
+      const doc = document as WebKitFullscreenDocument;
+      setIsFullscreen(
+        (doc.fullscreenElement || doc.webkitFullscreenElement) ===
+          playerRef.current,
+      );
+    };
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    document.addEventListener("webkitfullscreenchange", updateFullscreen);
+    updateFullscreen();
+    return () => {
+      document.removeEventListener("fullscreenchange", updateFullscreen);
+      document.removeEventListener("webkitfullscreenchange", updateFullscreen);
+    };
+  }, []);
+  useEffect(() => {
+    revealControls();
+    return () => clearTimeout(hideTimer.current);
+  }, [revealControls]);
   const [current, setCurrent] = useState(0);
   const [volume, setVolume] = useState(1);
   const [scrub, setScrub] = useState<number>();
@@ -144,8 +184,24 @@ export function VideoPlayer({
             ? "房主缓冲中，等待统一恢复……"
             : "浏览器阻止了自动播放，点击继续";
   return (
-    <section className="player-card" ref={playerRef}>
-      <div className="video-stage" ref={stageRef}>
+    <section
+      className={`player-card${isFullscreen ? " is-fullscreen" : ""}${isFullscreen && !controlsVisible ? " controls-hidden" : ""}`}
+      ref={playerRef}
+      onPointerMove={(event) => {
+        if (event.pointerType !== "touch" && !event.buttons) revealControls();
+      }}
+      onPointerDown={(event) => {
+        revealControls();
+        if (controlsRef.current?.contains(event.target as Node))
+          clearTimeout(hideTimer.current);
+      }}
+      onPointerUp={revealControls}
+      onPointerCancel={revealControls}
+      onKeyDown={revealControls}
+      onFocus={revealControls}
+      onBlur={revealControls}
+    >
+      <div className="video-stage">
         {src ? (
           <video
             ref={ref}
@@ -172,7 +228,7 @@ export function VideoPlayer({
           <div className={`sync-pill ${syncStatus}`}>{statusText}</div>
         ) : null}
       </div>
-      <div className="controls">
+      <div className="controls" ref={controlsRef}>
         {isHost && (
           <button
             className="control-main"
@@ -274,9 +330,10 @@ export function VideoPlayer({
             if (playerRef.current)
               void togglePlayerFullscreen(playerRef.current, ref.current);
           }}
-          aria-label="全屏"
+          aria-label={isFullscreen ? "退出全屏" : "全屏"}
+          aria-pressed={isFullscreen}
         >
-          全屏
+          {isFullscreen ? "退出全屏" : "全屏"}
         </button>
       </div>
     </section>

@@ -812,39 +812,6 @@ button {
 .sync-pill.host-buffering {
   color: #ff936f;
 }
-.video-stage:fullscreen {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  max-height: none;
-  aspect-ratio: auto;
-  border-radius: 0;
-  background: #000;
-}
-.video-stage:fullscreen video {
-  width: 100%;
-  height: 100%;
-}
-.player-card:fullscreen {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  border-radius: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  background: #000;
-}
-.player-card:fullscreen .video-stage {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  max-height: none;
-  aspect-ratio: auto;
-}
-.player-card:fullscreen .video-stage video {
-  width: 100%;
-  height: 100%;
-}
 .controls > button,
 .controls > select {
   flex: 0 0 auto;
@@ -1349,30 +1316,61 @@ button {
   }
 }
 
-/* In landscape fullscreen, controls overlay the picture instead of shrinking it. */
-@media (orientation: landscape) {
-  .player-card:fullscreen {
-    display: block;
-  }
-  .player-card:fullscreen .video-stage {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    max-height: none;
-  }
-  .player-card:fullscreen .controls {
-    position: absolute;
-    z-index: 5;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    padding-right: max(14px, env(safe-area-inset-right));
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-    padding-left: max(14px, env(safe-area-inset-left));
-    background: linear-gradient(transparent, rgba(5, 7, 10, 0.94));
-  }
+/* The browser owns fullscreen bounds. Percentage sizing follows rotation and
+   browser UI changes without caching screen dimensions or reserving bar space.
+   The state class also covers prefixed WebKit fullscreen implementations. */
+.player-card:is(:fullscreen, .is-fullscreen) {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  display: block;
+  background: #000;
+}
+.player-card:is(:fullscreen, .is-fullscreen) .video-stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
+  background: #000;
+}
+.player-card:is(:fullscreen, .is-fullscreen) .controls {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  flex-wrap: wrap;
+  padding-right: max(14px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(14px, env(safe-area-inset-left));
+  background: linear-gradient(transparent, rgba(5, 7, 10, 0.94));
+}
+.player-card:is(:fullscreen, .is-fullscreen) .sync-pill {
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  max-width: calc(
+    100% - max(14px, env(safe-area-inset-left)) -
+      max(14px, env(safe-area-inset-right))
+  );
+}
+.player-card.controls-hidden {
+  cursor: none;
+}
+.player-card.controls-hidden .controls,
+.player-card.controls-hidden .sync-pill:not(.autoplay-blocked) {
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
