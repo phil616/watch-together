@@ -35,6 +35,7 @@ export async function api<T>(
     if (!csrf) {
       const r = await fetch("/api/v1/auth/csrf", {
         credentials: "same-origin",
+        signal: options.signal,
       });
       const j = await r.json();
       csrf = j.data.csrfToken;
@@ -46,7 +47,11 @@ export async function api<T>(
     headers,
     credentials: "same-origin",
   });
-  const json = await response.json().catch(() => ({}));
+  const json = await response.json().catch((error) => {
+    // Do not report a successful completion if its response body timed out.
+    if (options.signal?.aborted || response.ok) throw error;
+    return {};
+  });
   if (!response.ok)
     throw new APIError(
       json.error?.code ?? "REQUEST_FAILED",

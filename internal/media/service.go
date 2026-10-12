@@ -126,6 +126,12 @@ func (s *Service) Complete(ctx context.Context, owner, uploadID string, parts []
 	if m.OwnerUserID != owner {
 		return errors.New("FORBIDDEN")
 	}
+	if u.Status == "COMPLETED" && m.Status == "READY" {
+		return nil
+	}
+	if u.Status != "OPEN" || u.ExpiresAtMs <= s.Now().UnixMilli() {
+		return errors.New("upload is closed or expired")
+	}
 	if u.Mode == "multipart" {
 		if u.S3UploadID == nil {
 			return errors.New("invalid upload")
@@ -167,6 +173,12 @@ func (s *Service) Abort(ctx context.Context, owner, uploadID string) error {
 	}
 	if m.OwnerUserID != owner {
 		return errors.New("FORBIDDEN")
+	}
+	if u.Status == "COMPLETED" || m.Status == "READY" {
+		return errors.New("completed upload cannot be aborted")
+	}
+	if u.Status == "ABORTED" {
+		return nil
 	}
 	if u.S3UploadID != nil {
 		if err = s.Objects.AbortMultipart(ctx, m.ObjectKey, *u.S3UploadID); err != nil {

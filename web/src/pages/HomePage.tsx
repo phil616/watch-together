@@ -1,17 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, json } from "../api/client";
+import { uploadMedia } from "../api/upload";
 import { useAuth } from "../auth/AuthContext";
 import { Layout } from "../components/Layout";
 import type { Media, Room } from "../types";
-
-type UploadInit = {
-  mediaId: string;
-  uploadId: string;
-  mode: "single" | "multipart";
-  partSizeBytes?: number;
-  url?: string;
-};
 
 const roomStatusLabel = (status: Room["status"]) => {
   if (status === "OPEN") return "开放中";
@@ -27,6 +20,29 @@ export function HomePage() {
   const [media, setMedia] = useState<Media[]>([]);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState("");
+  const [busy, setBusy] = useState(false);
+  const uploadController = useRef<AbortController | null>(null);
+  const [storageHealth, setStorageHealth] = useState("");
+  const [checkingStorage, setCheckingStorage] = useState(false);
+  useEffect(() => () => uploadController.current?.abort(), []);
+  const checkStorage = async () => {
+    setCheckingStorage(true);
+    setStorageHealth("正在检测 OSS…");
+    try {
+      const result = await api<{ message: string }>("/api/v1/storage/health", {
+        signal: AbortSignal.timeout(10_000),
+      });
+      setStorageHealth(result.message);
+    } catch (e) {
+      setStorageHealth(
+        (e as Error).name === "TimeoutError"
+          ? "OSS 健康检测超时"
+          : (e as Error).message,
+      );
+    } finally {
+      setCheckingStorage(false);
+    }
+  };
 
   /** Reload both room and media lists from the API. */
   const load = () =>
@@ -77,66 +93,23 @@ export function HomePage() {
   };
   /** Upload a selected file directly to object storage from the browser. */
   const upload = async (e: FormEvent<HTMLInputElement>) => {
-    const file = e.currentTarget.files?.[0];
-    if (!file) return;
-    setUploading("正在申请上传…");
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    if (!file || uploadController.current) return;
+    const controller = new AbortController();
+    uploadController.current = controller;
+    setBusy(true);
     setError("");
     try {
-      const init = await api<UploadInit>("/api/v1/media/uploads", {
-        method: "POST",
-        body: json({
-          filename: file.name,
-          sizeBytes: file.size,
-          contentType: file.type || "video/mp4",
-        }),
-      });
-      const parts: { partNumber: number; etag: string }[] = [];
-      if (init.mode === "single") {
-        setUploading("正在直传对象存储…");
-        const put = await fetch(init.url!, {
-          method: "PUT",
-          headers: { "Content-Type": file.type || "video/mp4" },
-          body: file,
-        });
-        if (!put.ok) throw new Error(`上传失败 (${put.status})`);
-      } else {
-        const size = init.partSizeBytes!;
-        const count = Math.ceil(file.size / size);
-        const nums = Array.from({ length: count }, (_, i) => i + 1);
-        for (let offset = 0; offset < nums.length; offset += 100) {
-          const batch = nums.slice(offset, offset + 100);
-          const signed = await api<{
-            parts: { partNumber: number; url: string }[];
-          }>(`/api/v1/media/uploads/${init.uploadId}/parts`, {
-            method: "POST",
-            body: json({ partNumbers: batch }),
-          });
-          for (const p of signed.parts) {
-            setUploading(`上传分片 ${p.partNumber}/${count}`);
-            const put = await fetch(p.url, {
-              method: "PUT",
-              body: file.slice(
-                (p.partNumber - 1) * size,
-                Math.min(file.size, p.partNumber * size),
-              ),
-            });
-            if (!put.ok) throw new Error(`分片 ${p.partNumber} 上传失败`);
-            const etag = put.headers.get("ETag");
-            if (!etag) throw new Error("对象存储 CORS 未暴露 ETag 响应头");
-            parts.push({ partNumber: p.partNumber, etag });
-          }
-        }
-      }
-      setUploading("正在校验媒体…");
-      await api(`/api/v1/media/uploads/${init.uploadId}/complete`, {
-        method: "POST",
-        body: json({ parts }),
-      });
-      setUploading("上传完成");
-      await load();
+      await uploadMedia(file, controller.signal, setUploading);
     } catch (e) {
       setError((e as Error).message);
       setUploading("");
+    } finally {
+      uploadController.current = null;
+      setBusy(false);
+      input.value = "";
+      await load();
     }
   };
   return (
@@ -184,9 +157,40 @@ export function HomePage() {
           </p>
           <label className="file-drop">
             选择 MP4 或浏览器支持的视频
-            <input type="file" accept="video/*" onChange={upload} />
+            <input
+              type="file"
+              accept="video/*"
+              onChange={upload}
+              disabled={busy}
+            />
           </label>
-          {uploading && <p className="progress-text">{uploading}</p>}
+          {uploading && (
+            <p className="progress-text" role="status">
+              {uploading}
+            </p>
+          )}
+          {busy && (
+            <button
+              type="button"
+              className="ghost small"
+              onClick={() => uploadController.current?.abort()}
+            >
+              取消上传
+            </button>
+          )}
+          <button
+            type="button"
+            className="ghost small"
+            disabled={checkingStorage}
+            onClick={checkStorage}
+          >
+            {checkingStorage ? "检测中…" : "检测 OSS 连接"}
+          </button>
+          {storageHealth && (
+            <p className="progress-text" role="status">
+              {storageHealth}
+            </p>
+          )}
         </section>
       </div>
       <section className="library">

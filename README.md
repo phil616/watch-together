@@ -76,7 +76,9 @@ Vite 在 `http://localhost:5173` 提供页面并代理 API。应用本身不会�
 
 ## S3 配置
 
-bucket 必须保持私有。自定义 endpoint 时通常同时设置 `S3_PATH_STYLE=true`；AWS S3 一般留空 endpoint 并使用 virtual-hosted style。
+bucket 必须保持私有。MinIO 通常使用 `S3_PATH_STYLE=true`；AWS S3 一般留空 endpoint 并使用 virtual-hosted style。
+
+阿里云 OSS 使用 AWS SDK 的 S3 兼容端点，例如 `S3_ENDPOINT=https://s3.oss-cn-hangzhou.aliyuncs.com`，`S3_REGION=cn-hangzhou`，`S3_PATH_STYLE=false`。`S3_PUBLIC_ENDPOINT` 必须是浏览器可访问的同区域端点，不能填写内网端点。参见 [阿里云 AWS SDK 接入文档](https://www.alibabacloud.com/help/en/oss/developer-reference/use-aws-sdks-to-access-oss)。已有部署需同步修改环境变量并重启，仓库示例的修改不会自动更新服务器配置。
 
 浏览器必须能直接访问 endpoint，且 bucket CORS 至少允许应用 origin 的 `GET`、`HEAD`、`PUT`，并暴露 Multipart 所需的 `ETag`：
 
@@ -160,6 +162,7 @@ S3 对象应通过 bucket versioning/lifecycle 单独保护。恢复时先停止
 
 - `GET /healthz`：进程存活
 - `GET /readyz`：配置、Room Registry 和 SQLite 可用
+- `GET /api/v1/storage/health`：正式用户登录后可调用，5 秒内完成只读 HeadBucket 检测；响应 `data.status` 为 `ok`、`not_configured`、`timeout`、`access_denied`、`bucket_not_found` 或 `unavailable`，另含 `message` 和 `latencyMs`。HTTP 200 表示检测完成，OSS 是否健康以 `data.status` 为准；不会改变 `/readyz`。上传面板的“检测 OSS 连接”按钮使用此接口。该检查不验证浏览器 CORS、公共端点连通性或对象写权限。
 - `GET /diagnostics`：仅 loopback 可访问，返回活跃房间与 WebSocket 数
 
 日志为一行一个 JSON 对象，带 HTTP/WebSocket request ID。密码、Cookie、session/invite token、S3 secret 和完整 presigned URL 永不写入日志。
@@ -183,6 +186,7 @@ cd .. && make e2e
 
 - **登录返回 CSRF 错误**：确认页面与 API 同 origin，`APP_BASE_URL`、`ALLOWED_ORIGINS` 与代理传入的 origin 完全一致。
 - **WebSocket 403**：检查 Origin 白名单及 Nginx Upgrade headers；不要把 session token 放在 URL。
+- **分片进度倒退或重复**：新版按分片编号排序，每片只上传一次，以已完成数量显示进度；上传期间禁止再次选文件。API 请求 60 秒超时，单个 PUT 请求 10 分钟超时，可主动取消。失败会尝试清理未完成上传；合并响应不确定时保留对象，先刷新列表确认结果，避免删除可能已经完成的影片。
 - **上传拿不到 ETag**：对象已经上传但浏览器不能读响应头，给 bucket CORS 加 `ExposeHeaders: ETag`。
 - **视频无法 seek**：确认对象支持 Range、返回正确 MIME，并且目标已进入 `video.seekable`。
 - **数据库 locked**：确认只有一个实例使用此 SQLite 文件，文件位于本机可靠存储，且 WAL/`busy_timeout` 生效。

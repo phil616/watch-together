@@ -70,6 +70,7 @@ func (s *Server) Handler(static http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/v1/invites/{inviteToken}/info", s.inviteInfo)
 	mux.HandleFunc("POST /api/v1/invites/{inviteToken}/join", s.joinInvite)
 	mux.HandleFunc("GET /api/v1/media", s.listMedia)
+	mux.HandleFunc("GET /api/v1/storage/health", s.storageHealth)
 	mux.HandleFunc("POST /api/v1/media/uploads", s.initUpload)
 	mux.HandleFunc("POST /api/v1/media/uploads/{uploadID}/parts", s.uploadParts)
 	mux.HandleFunc("POST /api/v1/media/uploads/{uploadID}/complete", s.completeUpload)
@@ -536,6 +537,7 @@ func (s *Server) uploadParts(w http.ResponseWriter, r *http.Request) {
 	for n, u := range urls {
 		out = append(out, part{n, u})
 	}
+	slices.SortFunc(out, func(a, b part) int { return int(a.PartNumber - b.PartNumber) })
 	writeData(w, 200, map[string]any{"parts": out})
 }
 func (s *Server) completeUpload(w http.ResponseWriter, r *http.Request) {

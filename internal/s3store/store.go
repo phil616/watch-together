@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -53,6 +54,8 @@ func New(ctx context.Context, c config.S3Config) (ObjectStore, error) {
 	newClient := func(endpoint string) *s3.Client {
 		return s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.UsePathStyle = c.PathStyle
+			o.HTTPClient = &http.Client{Timeout: 20 * time.Second}
+			o.RetryMaxAttempts = 2
 			if endpoint != "" {
 				o.BaseEndpoint = aws.String(endpoint)
 			}
@@ -117,6 +120,8 @@ func (s *S3Store) Delete(ctx context.Context, key string) error {
 	return err
 }
 func (s *S3Store) Doctor(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &s.bucket})
 	return err
 }

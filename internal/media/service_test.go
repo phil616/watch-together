@@ -155,3 +155,25 @@ func TestUploadOwnershipAndUnrelatedRoomTicket(t *testing.T) {
 		t.Fatalf("unrelated room ticket error=%v", err)
 	}
 }
+
+func TestCompletedUploadIsIdempotentAndCannotBeAborted(t *testing.T) {
+	store := mediaStore(t)
+	objects := &fakeObjects{size: MultipartThreshold}
+	svc := New(store, objects, 1<<30, time.Hour, time.Hour)
+	ctx := context.Background()
+	init, err := svc.Init(ctx, "owner", "movie.mp4", "video/mp4", MultipartThreshold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := []s3store.CompletedPart{{PartNumber: 1, ETag: "first"}, {PartNumber: 2, ETag: "second"}}
+	if err = svc.Complete(ctx, "owner", init.UploadID, parts); err != nil {
+		t.Fatal(err)
+	}
+	objects.completed = false
+	if err = svc.Complete(ctx, "owner", init.UploadID, parts); err != nil || objects.completed {
+		t.Fatalf("retried multipart completion: %v", err)
+	}
+	if err = svc.Abort(ctx, "owner", init.UploadID); err == nil || objects.deleted || objects.aborted {
+		t.Fatal("completed object was aborted")
+	}
+}

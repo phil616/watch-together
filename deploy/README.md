@@ -32,13 +32,13 @@ MAX_MEDIA_SIZE_BYTES=21474836480
 ALLOWED_ORIGINS=https://watch.example.com
 LOG_LEVEL=info
 
-S3_ENDPOINT=https://oss-<region>.aliyuncs.com
-S3_PUBLIC_ENDPOINT=https://oss-<region>.aliyuncs.com
+S3_ENDPOINT=https://s3.oss-<region>.aliyuncs.com
+S3_PUBLIC_ENDPOINT=https://s3.oss-<region>.aliyuncs.com
 S3_REGION=<region>
 S3_BUCKET=your-movie-bucket
 S3_ACCESS_KEY_ID=your-access-key-id
 S3_SECRET_ACCESS_KEY=your-access-key-secret
-S3_PATH_STYLE=true
+S3_PATH_STYLE=false
 S3_UPLOAD_URL_TTL=1h
 S3_MEDIA_URL_TTL=6h
 EOF
