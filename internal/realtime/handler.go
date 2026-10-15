@@ -27,16 +27,31 @@ const (
 )
 
 type Handler struct {
-	Auth     *auth.Service
-	Rooms    *rooms.Service
-	Registry *rooms.Registry
-	Chat     *chat.Service
-	Origins  []string
-	Log      *slog.Logger
-	active   atomic.Int64
+	Auth        *auth.Service
+	Rooms       *rooms.Service
+	Registry    *rooms.Registry
+	Chat        *chat.Service
+	Origins     []string
+	Log         *slog.Logger
+	active      atomic.Int64
+	clientsMu   sync.Mutex
+	connections map[*connection]struct{}
 }
 
 func (h *Handler) Active() int64 { return h.active.Load() }
+func (h *Handler) RevokeUser(id string) {
+	h.clientsMu.Lock()
+	var clients []*connection
+	for c := range h.connections {
+		if c.identity.ID == id && !c.identity.Guest {
+			clients = append(clients, c)
+		}
+	}
+	h.clientsMu.Unlock()
+	for _, c := range clients {
+		c.Close(1008, "session revoked")
+	}
+}
 
 type inbound struct {
 	V         int             `json:"v"`
@@ -94,6 +109,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := &connection{ws: ws, identity: identity, roomID: room.ID, out: make(chan rooms.Envelope, 64), done: make(chan struct{})}
+	h.clientsMu.Lock()
+	if h.connections == nil {
+		h.connections = make(map[*connection]struct{})
+	}
+	h.connections[c] = struct{}{}
+	h.clientsMu.Unlock()
+	defer func() { h.clientsMu.Lock(); delete(h.connections, c); h.clientsMu.Unlock() }()
+	// Cover invalidation racing between the handshake and connection tracking.
+	if _, _, e := h.Auth.Authenticate(ctx, r); e != nil {
+		c.Close(1008, "session expired")
+		return
+	}
 	actor, err := h.Registry.Get(ctx, room.ID)
 	if err != nil {
 		h.logRejected("room_actor", r, identity.ID, err)
@@ -129,6 +156,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if msg.RoomID != "" && msg.RoomID != room.ID {
 			c.Send(errorEnvelope(msg.RequestID, "INVALID_COMMAND", "Room mismatch."))
 			continue
+		}
+		if _, _, e := h.Auth.Authenticate(ctx, r); e != nil {
+			c.Close(1008, "session expired")
+			return
 		}
 		switch msg.Type {
 		case "clock.ping":

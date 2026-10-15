@@ -65,3 +65,35 @@ func TestSessionRoomMessageAndCheckpointRepositories(t *testing.T) {
 		t.Fatalf("reopened room=%+v err=%v", reopened, err)
 	}
 }
+
+func TestResetRejectsLoginVerifiedAgainstOldPassword(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "reset.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := New(db)
+	u := model.User{ID: "u", Username: "alice", Nickname: "Alice"}
+	if err = s.CreateUser(ctx, u, "old-hash", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.UpdateUser(ctx, "u", "alice", "Alice", "new-hash", false, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CreateSessionForPassword(ctx, "s1", "u", "old-hash", "old-token", "csrf", 100, 3, "", ""); err != ErrNotFound {
+		t.Fatalf("old verified password created session: %v", err)
+	}
+	if err = s.CreateSessionForPassword(ctx, "s2", "u", "new-hash", "new-token", "csrf", 100, 3, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.UpdateUser(ctx, "u", "alice", "Alice", "", true, 4); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.SessionIdentity(ctx, "new-token", 5); err != ErrNotFound {
+		t.Fatalf("disabled session survived: %v", err)
+	}
+	if err = s.CreateSessionForPassword(ctx, "s3", "u", "new-hash", "disabled-token", "csrf", 100, 5, "", ""); err != ErrNotFound {
+		t.Fatal("disabled login allowed", err)
+	}
+}

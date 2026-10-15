@@ -1,5 +1,7 @@
 /** Authenticated or guest identity returned by the backend. */
 export type Identity = {
+  role?: "USER" | "SUPER_ADMIN";
+  username?: string;
   id: string;
   nickname: string;
   roomId?: string;

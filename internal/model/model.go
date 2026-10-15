@@ -1,6 +1,11 @@
 package model
 
+const RoleUser = "USER"
+const RoleSuperAdmin = "SUPER_ADMIN"
+
 type User struct {
+	Role        string `json:"role"`
+	Disabled    bool   `json:"disabled"`
 	ID          string `json:"id"`
 	Username    string `json:"username"`
 	Nickname    string `json:"nickname"`
@@ -8,6 +13,8 @@ type User struct {
 }
 
 type Identity struct {
+	Role     string `json:"role,omitempty"`
+	Username string `json:"username,omitempty"`
 	ID       string `json:"id"`
 	Nickname string `json:"nickname"`
 	RoomID   string `json:"roomId,omitempty"`

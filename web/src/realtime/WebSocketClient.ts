@@ -8,6 +8,7 @@ export type ConnectionStatus =
   | "disconnected"
   | "superseded"
   | "closed"
+  | "unauthorized"
   | "forbidden"
   | "full";
 type Pending = {
@@ -104,6 +105,11 @@ export class WebSocketClient {
       event.reason === "removed from room"
     )
       terminal = "forbidden";
+    else if (
+      event.reason === "session revoked" ||
+      event.reason === "session expired"
+    )
+      terminal = "unauthorized";
     else if (event.reason === "ROOM_FULL") terminal = "full";
     if (terminal) {
       this.stopped = true;

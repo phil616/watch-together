@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Avatar, Badge, Button, Group, Text, ThemeIcon } from "@mantine/core";
-import { IconMovie, IconLogout } from "@tabler/icons-react";
+import { IconMovie, IconLogout, IconShieldLock } from "@tabler/icons-react";
 import { useAuth } from "../auth/AuthContext";
 
 export function Layout({
@@ -30,7 +30,20 @@ export function Layout({
         <Group gap="sm" wrap="nowrap">
           {identity ? (
             <>
-              <Avatar color="amber" radius="xl" size={30}>
+              {identity.role === "SUPER_ADMIN" && !identity.guest && (
+                <Button
+                  component={Link}
+                  to="/admin"
+                  className="admin-entry"
+                  aria-label="管理后台"
+                  variant="light"
+                  size="xs"
+                  leftSection={<IconShieldLock size={15} />}
+                >
+                  <span className="admin-entry-label">管理后台</span>
+                </Button>
+              )}
+              <Avatar color="amber" radius="xl" size={30} visibleFrom="xs">
                 {identity.nickname.slice(0, 1)}
               </Avatar>
               <Text size="sm" className="user-chip" maw={140} truncate>

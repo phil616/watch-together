@@ -1,5 +1,9 @@
 import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import { theme } from "../src/theme";
+import { useChatComposer } from "../src/realtime/useChatComposer";
+import "@mantine/core/styles.css";
 import { VideoPlayer } from "../src/components/VideoPlayer";
 import { RoomBroadcastStream } from "../src/realtime/RoomBroadcastStream";
 import type { SyncController } from "../src/player/SyncController";
@@ -27,7 +31,18 @@ const controller = {
     calls.push(["rate", value]);
   },
 };
+const chatClient = {
+  async send(type: string, payload: any) {
+    calls.push([type, payload.content]);
+    broadcasts.receive({
+      id: crypto.randomUUID(),
+      senderNickname: "测试用户",
+      content: payload.content,
+    });
+  },
+};
 function Fixture() {
+  const chat = useChatComposer(chatClient, true);
   const sequence = useRef(0);
   const [status, setStatus] = useState(true);
   const [host, setHost] = useState(true);
@@ -59,10 +74,15 @@ function Fixture() {
         syncStatus="synced"
         syncStatusVisible={status}
         broadcasts={broadcasts}
+        chat={chat}
         onSyncStatusToggle={() => setStatus(!status)}
       />
     </>
   );
 }
 Object.assign(window, { calls, broadcasts });
-createRoot(document.getElementById("root")!).render(<Fixture />);
+createRoot(document.getElementById("root")!).render(
+  <MantineProvider theme={theme} forceColorScheme="dark">
+    <Fixture />
+  </MantineProvider>,
+);

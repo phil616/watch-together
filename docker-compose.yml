@@ -3,6 +3,9 @@ services:
     build: .
     ports: ["8080:8080"]
     environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NICKNAME: ${ADMIN_NICKNAME:-超级管理员}
       APP_ENV: development
       APP_BASE_URL: http://localhost:8080
       HTTP_LISTEN_ADDR: 0.0.0.0:8080
@@ -26,7 +29,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-      MINIO_API_CORS_ALLOW_ORIGIN: http://127.0.0.1:18080,http://localhost:8080,http://localhost:5173
+      MINIO_API_CORS_ALLOW_ORIGIN: http://127.0.0.1:18080,http://127.0.0.1:18081,http://localhost:8080,http://localhost:5173
     volumes: ["minio-data:/data"]
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]

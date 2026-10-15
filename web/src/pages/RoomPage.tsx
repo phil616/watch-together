@@ -1,13 +1,11 @@
 import {
   IconMessageCircle,
   IconUsers,
-  IconSend,
   IconArrowLeft,
 } from "@tabler/icons-react";
 import { confirmAction } from "../components/confirmAction";
 import {
   Button,
-  TextInput,
   NativeSelect,
   Paper,
   Alert,
@@ -16,11 +14,13 @@ import {
   Avatar,
   Text,
 } from "@mantine/core";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, json } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Layout } from "../components/Layout";
+import { ChatComposer } from "../components/ChatComposer";
+import { useChatComposer } from "../realtime/useChatComposer";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { SyncController, type SyncStatus } from "../player/SyncController";
 import {
@@ -71,6 +71,7 @@ export function RoomPage() {
   const messageListRef = useRef<HTMLDivElement>(null);
   const keepChatAtBottom = useRef(true);
   const ws = useMemo(() => new WebSocketClient(code, setConnection), [code]);
+  const chat = useChatComposer(ws, connection === "connected");
   const broadcasts = useMemo(() => new RoomBroadcastStream(), [ws]);
   const isHost = !!identity && room?.hostUserId === identity.id;
   const roomClosed = room?.status === "CLOSED";
@@ -81,6 +82,11 @@ export function RoomPage() {
   useEffect(() => {
     if (!loading && !identity) nav("/login");
   }, [identity, loading]);
+  useEffect(() => {
+    if (connection === "unauthorized") void refresh();
+    if (connection === "closed")
+      setRoom((r) => (r ? { ...r, status: "CLOSED" } : r));
+  }, [connection]);
   useEffect(() => {
     controller.setHost(isHost);
   }, [controller, isHost]);
@@ -181,6 +187,11 @@ export function RoomPage() {
         setMembers((ms) =>
           ms.map((m) => ({ ...m, role: m.id === id ? "host" : "member" })),
         );
+      } else if (e.type === "event.room.updated") {
+        const update = e.payload as { title: string };
+        setRoom((previous) =>
+          previous ? { ...previous, title: update.title } : previous,
+        );
       } else if (e.type === "event.room.closed") {
         setError("房间已关闭");
         setRoom((r) => (r ? { ...r, status: "CLOSED" } : r));
@@ -237,18 +248,6 @@ export function RoomPage() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [playback?.mediaId, room?.mediaId, room?.id, code, identity, ticketNonce]);
-  const sendChat = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const input = form.elements.namedItem("message") as HTMLInputElement;
-    if (!input.value.trim()) return;
-    try {
-      await ws.send("chat.send", { content: input.value });
-      input.value = "";
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
   const toggleSyncStatus = () => {
     setSyncStatusVisible((current) => {
       const next = !current;
@@ -364,11 +363,13 @@ export function RoomPage() {
                   ? "已在其他页面接管"
                   : connection === "closed"
                     ? "房间已关闭"
-                    : connection === "forbidden"
-                      ? "无权连接房间"
-                      : connection === "full"
-                        ? "房间人数已满"
-                        : "连接中断"}
+                    : connection === "unauthorized"
+                      ? "登录已失效，请重新登录"
+                      : connection === "forbidden"
+                        ? "无权连接房间"
+                        : connection === "full"
+                          ? "房间人数已满"
+                          : "连接中断"}
           </span>
           {room?.status === "CLOSED" && isHost && (
             <Button variant="default" onClick={reopenRoom}>
@@ -428,6 +429,7 @@ export function RoomPage() {
             syncStatus={syncStatus}
             syncStatusVisible={syncStatusVisible}
             broadcasts={broadcasts}
+            chat={chat}
             onSyncStatusToggle={toggleSyncStatus}
             onMediaError={() => {
               if (pendingSrc) {
@@ -545,25 +547,7 @@ export function RoomPage() {
                 </div>
               )}
             </div>
-            <form className="chat-form" onSubmit={sendChat}>
-              <TextInput
-                aria-label="聊天消息"
-                name="message"
-                maxLength={2000}
-                autoComplete="off"
-                placeholder={
-                  connection === "connected" ? "发送消息…" : "等待重新连接…"
-                }
-                disabled={connection !== "connected"}
-              />
-              <Button
-                type="submit"
-                aria-label="发送消息"
-                disabled={connection !== "connected"}
-              >
-                <IconSend size={18} />
-              </Button>
-            </form>
+            <ChatComposer chat={chat} placement="sidebar" />
           </Tabs.Panel>
           <Tabs.Panel value="members" className="member-list">
             <h3>在线成员</h3>

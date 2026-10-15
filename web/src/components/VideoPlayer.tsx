@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { ChatComposer, type ChatComposerState } from "./ChatComposer";
 import Artplayer from "artplayer";
 import { createPortal } from "react-dom";
 import { LiveBroadcastOverlay } from "./LiveBroadcastOverlay";
@@ -85,7 +86,9 @@ export function VideoPlayer({
   broadcasts,
   onSyncStatusToggle,
   onMediaError,
+  chat,
 }: {
+  chat?: ChatComposerState;
   src?: string;
   state?: PlaybackState;
   isHost: boolean;
@@ -106,6 +109,12 @@ export function VideoPlayer({
     host.className = "room-broadcast-host";
     return host;
   }, []);
+  const chatHost = useMemo(() => {
+    const host = document.createElement("div");
+    host.className = "room-chat-control-host";
+    return host;
+  }, []);
+  const hasChat = !!chat;
   const latest = useRef({
     onMediaError,
     onSyncStatusToggle,
@@ -155,6 +164,28 @@ export function VideoPlayer({
     });
     art.template.$player.classList.add("room-player");
     art.template.$player.appendChild(broadcastHost);
+    if (hasChat) {
+      // Register with the native controls collection. ArtPlayer owns placement,
+      // hover/touch wake-up and idle hiding for this control and its siblings.
+      art.template.$player.classList.add("room-has-chat");
+      art.controls.add({
+        name: "room-chat",
+        position: "right",
+        index: 1,
+        html: chatHost,
+      });
+      art.proxy(chatHost, "focusin", () => {
+        art.controls.show = true;
+      });
+      art.proxy(chatHost, "focusout", (event: Event) => {
+        if (
+          !chatHost.contains((event as FocusEvent).relatedTarget as Node | null)
+        ) {
+          // Restart the library's idle window when keyboard focus leaves.
+          art.controls.show = true;
+        }
+      });
+    }
     // Remove the duplicate native fullscreen button through the component API,
     // rather than relying on CSS specificity against injected plugin styles.
     art.controls.remove("fullscreen");
@@ -173,16 +204,23 @@ export function VideoPlayer({
     const disconnect = connectPlayer(art.video, controller);
     art.on("video:error", () => latest.current.onMediaError?.());
     art.on("control", (visible) => {
+      // Native idle detection does not track Tab focus. Keep the native toolbar
+      // open while editing or focusing Send; no separate visibility timer.
+      if (!visible && chatHost.contains(document.activeElement)) {
+        art.controls.show = true;
+        return;
+      }
       art.template.$player.classList.toggle("room-controls-hidden", !visible);
     });
     return () => {
       broadcastHost.remove();
+      chatHost.remove();
       player.current = null;
       disconnect();
       art.destroy();
     };
     // Toggle/settings updates must not recreate the video or reset its timeline.
-  }, [src, controller, broadcastHost]);
+  }, [src, controller, broadcastHost, chatHost, hasChat]);
   useEffect(() => {
     if (state) controller.setRoomState(state);
   }, [state, controller, src]);
@@ -229,6 +267,8 @@ export function VideoPlayer({
           </div>
         </div>
       )}
+      {chat &&
+        createPortal(<ChatComposer chat={chat} placement="player" />, chatHost)}
       {createPortal(
         <LiveBroadcastOverlay stream={broadcasts} />,
         broadcastHost,

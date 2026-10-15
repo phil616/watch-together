@@ -1,3 +1,4 @@
+import { provisionUser } from "./accounts";
 import { expect, test } from "@playwright/test";
 import { Buffer } from "node:buffer";
 
@@ -48,11 +49,12 @@ test("two browsers upload, join, synchronize, chat and recover state", async ({
   });
   const host = await hostContext.newPage();
   const suffix = Date.now().toString(36);
-  await host.goto("/register");
-  await host.getByLabel("昵称").fill("Alice");
-  await host.getByLabel("用户名").fill(`alice-${suffix}`);
-  await host.getByLabel(/^密码/).fill("correct-horse-battery-staple");
-  await host.getByRole("button", { name: "注册并登录" }).click();
+  await provisionUser(
+    host,
+    `alice-${suffix}`,
+    "correct-horse-battery-staple",
+    "Alice",
+  );
   await expect(host.getByText("今晚，看点什么？")).toBeVisible();
   const video = await syntheticVideo(host);
   await host.locator("input[type=file]").setInputFiles({

@@ -82,6 +82,8 @@ describe("WebSocketClient reconnect", () => {
   it.each([
     [1008, "ROOM_CLOSED", "closed"],
     [1008, "FORBIDDEN", "forbidden"],
+    [1008, "session revoked", "unauthorized"],
+    [1008, "session expired", "unauthorized"],
     [1008, "ROOM_FULL", "full"],
     [1000, "room closed", "closed"],
   ])(

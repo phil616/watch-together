@@ -61,6 +61,7 @@ type Persistence interface {
 	UpdateMediaMetadata(context.Context, string, int64, int, int, int64) error
 	DeleteGuestSession(context.Context, string, string) error
 	UpdateRoomStatus(context.Context, string, string, int64) error
+	UpdateRoomTitle(context.Context, string, string, int64) error
 }
 
 type Actor struct {
@@ -96,6 +97,10 @@ type result struct {
 type snapshotReq struct{ reply chan map[string]any }
 type closeReq struct{ done chan struct{} }
 type reopenReq struct{ reply chan error }
+type renameReq struct {
+	title string
+	reply chan error
+}
 type expireHost struct{ hostID string }
 type broadcastReq struct{ event Envelope }
 type readyReq struct {
@@ -151,12 +156,16 @@ func (a *Actor) Join(ctx context.Context, c Client) error {
 	reply := make(chan error, 1)
 	select {
 	case a.commands <- joinReq{c, reply}:
+	case <-a.done:
+		return ErrRoomClosed
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 	select {
 	case e := <-reply:
 		return e
+	case <-a.done:
+		return ErrRoomClosed
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -177,12 +186,16 @@ func (a *Actor) Command(ctx context.Context, i model.Identity, c Command) (*Play
 	reply := make(chan result, 1)
 	select {
 	case a.commands <- commandReq{i, c, reply}:
+	case <-a.done:
+		return nil, ErrRoomClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 	select {
 	case r := <-reply:
 		return r.state, r.err
+	case <-a.done:
+		return nil, ErrRoomClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -191,12 +204,16 @@ func (a *Actor) Snapshot(ctx context.Context) map[string]any {
 	reply := make(chan map[string]any, 1)
 	select {
 	case a.commands <- snapshotReq{reply}:
+	case <-a.done:
+		return nil
 	case <-ctx.Done():
 		return nil
 	}
 	select {
 	case s := <-reply:
 		return s
+	case <-a.done:
+		return nil
 	case <-ctx.Done():
 		return nil
 	}
@@ -222,6 +239,24 @@ func (a *Actor) Stop() {
 	}
 }
 
+func (a *Actor) Rename(ctx context.Context, title string) error {
+	reply := make(chan error, 1)
+	select {
+	case a.commands <- renameReq{title, reply}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-a.done:
+		return ErrRoomClosed
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-a.done:
+		return ErrRoomClosed
+	}
+}
 func (a *Actor) Reopen(ctx context.Context) error {
 	reply := make(chan error, 1)
 	select {
@@ -394,6 +429,13 @@ func (a *Actor) run() {
 			a.room.ClosedAtMs = nil
 			a.room.UpdatedAtMs = now
 			x.reply <- nil
+		case renameReq:
+			err := a.persist.UpdateRoomTitle(context.Background(), a.room.ID, x.title, a.now().UnixMilli())
+			if err == nil {
+				a.room.Title = x.title
+				broadcast(Envelope{Type: "event.room.updated", Payload: map[string]any{"title": x.title}})
+			}
+			x.reply <- err
 		case closeReq:
 			if hostTimer != nil {
 				hostTimer.Stop()
@@ -439,7 +481,7 @@ func (a *Actor) apply(i model.Identity, c Command, broadcast func(Envelope), mem
 	if c.Type == "telemetry.member.playback" || c.Type == "presence.typing" {
 		return nil, nil
 	}
-	if i.ID != a.room.HostUserID {
+	if i.ID != a.room.HostUserID && !(isAdmin && !i.Guest && i.Role == model.RoleSuperAdmin) {
 		return nil, ErrNotHost
 	}
 	now := a.now().UnixMilli()
@@ -651,10 +693,9 @@ func NewRegistry(store *repository.Store, grace time.Duration) *Registry {
 	return r
 }
 func (r *Registry) Get(ctx context.Context, id string) (*Actor, error) {
-	r.mu.RLock()
-	a := r.actors[id]
-	r.mu.RUnlock()
-	if a != nil {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a := r.actors[id]; a != nil {
 		return a, nil
 	}
 	room, err := r.store.RoomByID(ctx, id)
@@ -665,13 +706,27 @@ func (r *Registry) Get(ctx context.Context, id string) (*Actor, error) {
 	if c, e := r.store.Checkpoint(ctx, id); e == nil {
 		checkpoint = &c
 	}
+	a := NewActor(room, checkpoint, r.store, r.grace)
+	r.actors[id] = a
+	return a, nil
+}
+
+// Serialize eviction with actor creation; stop checkpoint writes before deletion.
+func (r *Registry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if a = r.actors[id]; a == nil {
-		a = NewActor(room, checkpoint, r.store, r.grace)
-		r.actors[id] = a
+	room, err := r.store.RoomByID(ctx, id)
+	if err != nil {
+		return err
 	}
-	return a, nil
+	if room.Status != "CLOSED" {
+		return repository.ErrConflict
+	}
+	if a := r.actors[id]; a != nil {
+		a.Stop()
+		delete(r.actors, id)
+	}
+	return r.store.DeleteRoom(ctx, id)
 }
 func (r *Registry) ActiveRooms() int { r.mu.RLock(); defer r.mu.RUnlock(); return len(r.actors) }
 func (r *Registry) Ready() bool      { return r.ready.Load() }

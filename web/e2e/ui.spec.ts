@@ -1,3 +1,4 @@
+import { provisionUser } from "./accounts";
 import { expect, test } from "@playwright/test";
 
 // Exercise library integration with real CSP/API/WebSocket behavior, including
@@ -9,17 +10,12 @@ test("modern UI works on desktop and mobile with accessible tabs and dialogs", a
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/register");
-  await expect(page.getByRole("heading", { name: "创建账户" })).toBeVisible();
-  await page.screenshot({
-    path: testInfo.outputPath("register-desktop.png"),
-    fullPage: true,
-    animations: "disabled",
-  });
-  await page.getByLabel("昵称").fill("UI 观影者");
-  await page.getByLabel("用户名").fill(`ui-${Date.now().toString(36)}`);
-  await page.getByLabel(/^密码/).fill("correct-horse-battery-staple");
-  await page.getByRole("button", { name: "注册并登录" }).click();
+  await provisionUser(
+    page,
+    `ui-${Date.now().toString(36)}`,
+    "correct-horse-battery-staple",
+    "UI 观影者",
+  );
   await expect(
     page.getByRole("heading", { name: "今晚，看点什么？" }),
   ).toBeVisible();

@@ -58,6 +58,42 @@ func run() error {
 		log.Info("migrations_complete")
 		return nil
 	}
+	if command == "create-admin" || command == "reset-admin-password" {
+		service := auth.New(store, cfg.SessionTTL, false)
+		password := os.Getenv("ADMIN_PASSWORD")
+		if command == "create-admin" {
+			nickname := os.Getenv("ADMIN_NICKNAME")
+			if nickname == "" {
+				nickname = "超级管理员"
+			}
+			u, e := service.BootstrapAdmin(ctx, os.Getenv("ADMIN_USERNAME"), password, nickname)
+			if e != nil {
+				return fmt.Errorf("create-admin (requires a new username and no existing super admin): %w", e)
+			}
+			log.Info("super_admin_created", "username", u.Username)
+			return nil
+		}
+		if e := auth.ValidatePassword(password); e != nil {
+			return e
+		}
+		hash, e := auth.HashPassword(password)
+		if e != nil {
+			return e
+		}
+		var id string
+		if e = store.DB.QueryRowContext(ctx, `SELECT id FROM users WHERE role='SUPER_ADMIN'`).Scan(&id); e != nil {
+			return e
+		}
+		u, e := store.UserByID(ctx, id)
+		if e != nil {
+			return e
+		}
+		if e = store.UpdateUser(ctx, id, u.Username, u.Nickname, hash, false, time.Now().UnixMilli()); e != nil {
+			return e
+		}
+		log.Info("super_admin_password_reset")
+		return nil
+	}
 	objects, err := s3store.New(ctx, cfg.S3)
 	if err != nil {
 		return fmt.Errorf("object store: %w", err)
@@ -73,10 +109,30 @@ func run() error {
 		return nil
 	}
 	if command != "serve" {
-		return fmt.Errorf("unknown command %q (use serve, migrate, or doctor)", command)
+		return fmt.Errorf("unknown command %q (use serve, migrate, doctor, create-admin, or reset-admin-password)", command)
 	}
 	secure := cfg.Environment == "production" || strings.HasPrefix(cfg.BaseURL, "https://")
 	authService := auth.New(store, cfg.SessionTTL, secure)
+	var adminCount int
+	if err = store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role='SUPER_ADMIN'`).Scan(&adminCount); err != nil {
+		return err
+	}
+	if adminCount == 0 && (os.Getenv("ADMIN_USERNAME") != "" || os.Getenv("ADMIN_PASSWORD") != "") {
+		nickname := os.Getenv("ADMIN_NICKNAME")
+		if nickname == "" {
+			nickname = "超级管理员"
+		}
+		u, e := authService.BootstrapAdmin(ctx, os.Getenv("ADMIN_USERNAME"), os.Getenv("ADMIN_PASSWORD"), nickname)
+		if e != nil {
+			return fmt.Errorf("bootstrap super administrator: %w", e)
+		}
+		log.Info("super_admin_created", "username", u.Username)
+		adminCount = 1
+	}
+	if adminCount == 0 {
+		return errors.New("no super administrator: configure ADMIN_USERNAME and ADMIN_PASSWORD or run create-admin before serve")
+	}
+
 	registry := rooms.NewRegistry(store, cfg.HostReconnectGrace)
 	roomService := rooms.NewService(store, registry, cfg.RoomMaxMembers)
 	mediaService := media.New(store, objects, cfg.MaxMediaSize, cfg.S3.UploadURLTTL, cfg.S3.MediaURLTTL)

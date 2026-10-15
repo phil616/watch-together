@@ -70,3 +70,37 @@ func TestMigrationRestoresLegacyAutoClosedRooms(t *testing.T) {
 		t.Fatalf("one-time repair changed a future explicit close to %s", status)
 	}
 }
+
+func TestManagedAccountsMigrationKeepsExistingUsersAndProtectsAdmin(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "managed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	initial, _ := migrations.ReadFile("migrations/001_initial.sql")
+	if _, err = db.Exec(string(initial)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at_ms INTEGER NOT NULL);INSERT INTO schema_migrations VALUES(1,1),(2,2);INSERT INTO users VALUES('old','old-user','unchanged-hash','Old',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = Migrate(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var role, hash string
+	var disabled bool
+	if err = db.QueryRow(`SELECT role,disabled,password_hash FROM users WHERE id='old'`).Scan(&role, &disabled, &hash); err != nil {
+		t.Fatal(err)
+	}
+	if role != "USER" || disabled || hash != "unchanged-hash" {
+		t.Fatalf("legacy user changed: %s %v %s", role, disabled, hash)
+	}
+	if _, err = db.Exec(`INSERT INTO users(id,username,password_hash,nickname,created_at_ms,updated_at_ms,role) VALUES('admin','admin','hash','Admin',1,1,'SUPER_ADMIN')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`DELETE FROM users WHERE id='admin'`, `UPDATE users SET disabled=1 WHERE id='admin'`, `UPDATE users SET role='USER' WHERE id='admin'`, `INSERT INTO users(id,username,password_hash,nickname,created_at_ms,updated_at_ms,role) VALUES('second','second','hash','Second',1,1,'SUPER_ADMIN')`} {
+		if _, err = db.Exec(q); err == nil {
+			t.Fatalf("admin invariant bypassed: %s", q)
+		}
+	}
+}

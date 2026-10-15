@@ -34,24 +34,21 @@ func New(store *repository.Store, ttl time.Duration, secure bool) *Service {
 	return &Service{Store: store, TTL: ttl, Secure: secure, Now: time.Now}
 }
 
-func (s *Service) Register(ctx context.Context, username, password, nickname string) (model.User, error) {
-	username = strings.ToLower(strings.TrimSpace(username))
-	nickname = strings.TrimSpace(nickname)
-	if len(username) < 3 || len(username) > 40 || !identifier(username) {
-		return model.User{}, errors.New("username must be 3-40 letters, numbers, dots, dashes or underscores")
+func (s *Service) CreateUser(ctx context.Context, username, password, nickname string) (model.User, error) {
+	var err error
+	username, nickname, err = NormalizeAccount(username, nickname)
+	if err != nil {
+		return model.User{}, err
 	}
-	if len([]rune(nickname)) < 1 || len([]rune(nickname)) > 60 {
-		return model.User{}, errors.New("nickname must be 1-60 characters")
-	}
-	if len(password) < 10 || len(password) > 256 {
-		return model.User{}, errors.New("password must be 10-256 characters")
+	if err = ValidatePassword(password); err != nil {
+		return model.User{}, err
 	}
 	hash, err := HashPassword(password)
 	if err != nil {
 		return model.User{}, err
 	}
 	now := s.Now().UnixMilli()
-	u := model.User{ID: uuid.NewString(), Username: username, Nickname: nickname, CreatedAtMs: now}
+	u := model.User{ID: uuid.NewString(), Username: username, Nickname: nickname, Role: model.RoleUser, CreatedAtMs: now}
 	if err = s.Store.CreateUser(ctx, u, hash, now); err != nil {
 		return model.User{}, err
 	}
@@ -68,7 +65,7 @@ func identifier(s string) bool {
 
 func (s *Service) Login(ctx context.Context, username, password, ip, ua string) (model.User, string, string, error) {
 	u, hash, err := s.Store.UserByUsername(ctx, strings.ToLower(strings.TrimSpace(username)))
-	if err != nil {
+	if err != nil || u.Disabled || len(password) > 256 {
 		return model.User{}, "", "", errors.New("invalid credentials")
 	}
 	ok, err := VerifyPassword(password, hash)
@@ -84,7 +81,7 @@ func (s *Service) Login(ctx context.Context, username, password, ip, ua string) 
 		return model.User{}, "", "", err
 	}
 	now := s.Now().UnixMilli()
-	if err = s.Store.CreateSession(ctx, uuid.NewString(), u.ID, TokenHash(token), TokenHash(csrf), now+s.TTL.Milliseconds(), now, ip, ua); err != nil {
+	if err = s.Store.CreateSessionForPassword(ctx, uuid.NewString(), u.ID, hash, TokenHash(token), TokenHash(csrf), now+s.TTL.Milliseconds(), now, ip, ua); err != nil {
 		return model.User{}, "", "", err
 	}
 	return u, token, csrf, nil

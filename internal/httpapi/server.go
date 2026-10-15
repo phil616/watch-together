@@ -53,6 +53,7 @@ func (s *Server) Handler(static http.Handler) http.Handler {
 	mux.HandleFunc("GET /diagnostics", s.diagnostics)
 	mux.HandleFunc("GET /api/v1/auth/csrf", s.csrf)
 	mux.HandleFunc("POST /api/v1/auth/register", s.register)
+	s.adminRoutes(mux)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/auth/me", s.me)
@@ -93,6 +94,9 @@ func (s *Server) middleware(next *http.ServeMux) http.Handler {
 			id = uuid.NewString()
 		}
 		ctx := context.WithValue(r.Context(), requestIDKey, id)
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		w.Header().Set("X-Request-ID", id)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -179,29 +183,9 @@ func (s *Server) csrf(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
-	if !s.originAllowed(r) || !anonymousCSRF(r) {
-		writeError(w, r, 403, "FORBIDDEN", "CSRF validation failed.")
-		return
-	}
-	if s.LoginLimiter != nil && !s.LoginLimiter.Allow("register:"+auth.RemoteIP(r)) {
-		writeError(w, r, 429, "RATE_LIMITED", "Too many requests.")
-		return
-	}
-	var in struct{ Username, Password, Nickname string }
-	if !decode(w, r, &in) {
-		return
-	}
-	u, err := s.Auth.Register(r.Context(), in.Username, in.Password, in.Nickname)
-	if err != nil {
-		code := "INVALID_REQUEST"
-		if repository.IsUniqueViolation(err) {
-			code = "USERNAME_TAKEN"
-		}
-		writeError(w, r, 400, code, err.Error())
-		return
-	}
-	writeData(w, 201, u)
+	writeError(w, r, 403, "REGISTRATION_DISABLED", "自由注册已关闭，请联系管理员创建账户。")
 }
+
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.originAllowed(r) || !anonymousCSRF(r) {
 		writeError(w, r, 403, "FORBIDDEN", "CSRF validation failed.")
@@ -313,7 +297,10 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 400, "INVALID_REQUEST", "Invalid title.")
 		return
 	}
-	err = s.Store.UpdateRoomTitle(r.Context(), room.ID, in.Title, time.Now().UnixMilli())
+	actor, err := s.Registry.Get(r.Context(), room.ID)
+	if err == nil {
+		err = actor.Rename(r.Context(), in.Title)
+	}
 	if err != nil {
 		writeError(w, r, 500, "INTERNAL_ERROR", "Unable to update room.")
 		return
@@ -580,7 +567,7 @@ func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	used, err := s.Store.MediaInUse(r.Context(), id)
-	if err != nil || used {
+	if err != nil || used || m.Status == "UPLOADING" {
 		writeError(w, r, 409, "MEDIA_IN_USE", "Media is used by an open room.")
 		return
 	}

@@ -49,7 +49,8 @@ func (*fakePersistence) SetRoomMedia(context.Context, string, string, int64) err
 func (*fakePersistence) UpdateMediaMetadata(context.Context, string, int64, int, int, int64) error {
 	return nil
 }
-func (*fakePersistence) DeleteGuestSession(context.Context, string, string) error { return nil }
+func (*fakePersistence) UpdateRoomTitle(context.Context, string, string, int64) error { return nil }
+func (*fakePersistence) DeleteGuestSession(context.Context, string, string) error     { return nil }
 func (f *fakePersistence) UpdateRoomStatus(_ context.Context, _ string, status string, _ int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

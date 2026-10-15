@@ -32,6 +32,11 @@ MAX_MEDIA_SIZE_BYTES=21474836480
 ALLOWED_ORIGINS=https://watch.example.com
 LOG_LEVEL=info
 
+# 首次启动：创建唯一超级管理员；用户名须未被旧账户使用。
+ADMIN_USERNAME=your-admin
+ADMIN_PASSWORD=replace-with-a-strong-password
+ADMIN_NICKNAME=超级管理员
+
 S3_ENDPOINT=https://s3.oss-<region>.aliyuncs.com
 S3_PUBLIC_ENDPOINT=https://s3.oss-<region>.aliyuncs.com
 S3_REGION=<region>
@@ -46,6 +51,8 @@ EOF
 sudo chown movie-sync:movie-sync /opt/movie-sync/.env
 sudo chmod 600 /opt/movie-sync/.env
 ```
+
+首次启动会读取服务环境中的管理员配置；已有超级管理员时不会覆盖账户或密码。升级到 v1.2.0 前先备份 SQLite，在此环境文件中配置初始管理员，再替换二进制并重启。旧账户、密码和资源保留；自由注册关闭，后续账户通过 `/admin` 创建。详见[账户管理说明](../docs/ACCOUNT_MANAGEMENT.md)。
 
 ### 安装 systemd 服务
 

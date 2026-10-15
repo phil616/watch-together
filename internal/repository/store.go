@@ -17,14 +17,17 @@ type Store struct{ DB *sql.DB }
 func New(db *sql.DB) *Store { return &Store{DB: db} }
 
 func (s *Store) CreateUser(ctx context.Context, u model.User, hash string, now int64) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO users(id,username,password_hash,nickname,created_at_ms,updated_at_ms) VALUES(?,?,?,?,?,?)`, u.ID, u.Username, hash, u.Nickname, now, now)
+	if u.Role == "" {
+		u.Role = model.RoleUser
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO users(id,username,password_hash,nickname,created_at_ms,updated_at_ms,role,disabled) VALUES(?,?,?,?,?,?,?,?)`, u.ID, u.Username, hash, u.Nickname, now, now, u.Role, u.Disabled)
 	return err
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (model.User, string, error) {
 	var u model.User
 	var hash string
-	err := s.DB.QueryRowContext(ctx, `SELECT id,username,nickname,created_at_ms,password_hash FROM users WHERE username=?`, username).Scan(&u.ID, &u.Username, &u.Nickname, &u.CreatedAtMs, &hash)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,username,nickname,created_at_ms,role,disabled,password_hash FROM users WHERE username=?`, username).Scan(&u.ID, &u.Username, &u.Nickname, &u.CreatedAtMs, &u.Role, &u.Disabled, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -33,7 +36,7 @@ func (s *Store) UserByUsername(ctx context.Context, username string) (model.User
 
 func (s *Store) UserByID(ctx context.Context, id string) (model.User, error) {
 	var u model.User
-	err := s.DB.QueryRowContext(ctx, `SELECT id,username,nickname,created_at_ms FROM users WHERE id=?`, id).Scan(&u.ID, &u.Username, &u.Nickname, &u.CreatedAtMs)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,username,nickname,created_at_ms,role,disabled FROM users WHERE id=?`, id).Scan(&u.ID, &u.Username, &u.Nickname, &u.CreatedAtMs, &u.Role, &u.Disabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -48,7 +51,7 @@ func (s *Store) CreateSession(ctx context.Context, id, userID, tokenHash, csrfHa
 func (s *Store) SessionIdentity(ctx context.Context, tokenHash string, now int64) (model.Identity, string, error) {
 	var i model.Identity
 	var csrf string
-	err := s.DB.QueryRowContext(ctx, `SELECT u.id,u.nickname,s.csrf_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at_ms>?`, tokenHash, now).Scan(&i.ID, &i.Nickname, &csrf)
+	err := s.DB.QueryRowContext(ctx, `SELECT u.id,u.nickname,u.username,u.role,s.csrf_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at_ms>? AND u.disabled=0`, tokenHash, now).Scan(&i.ID, &i.Nickname, &i.Username, &i.Role, &csrf)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -229,7 +232,13 @@ func (s *Store) ReopenRoom(ctx context.Context, roomID string, now int64) error 
 	return nil
 }
 func (s *Store) SetRoomMedia(ctx context.Context, roomID, mediaID string, now int64) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE rooms SET media_id=?,updated_at_ms=? WHERE id=?`, mediaID, now, roomID)
+	res, err := s.DB.ExecContext(ctx, `UPDATE rooms SET media_id=?,updated_at_ms=? WHERE id=? AND EXISTS(SELECT 1 FROM media WHERE id=? AND status='READY' AND deleted_at_ms IS NULL)`, mediaID, now, roomID, mediaID)
+	if err == nil {
+		n, _ := res.RowsAffected()
+		if n != 1 {
+			return ErrNotFound
+		}
+	}
 	return err
 }
 func (s *Store) UpdateRoomTitle(ctx context.Context, roomID, title string, now int64) error {
@@ -388,7 +397,7 @@ func (s *Store) MediaInUse(ctx context.Context, id string) (bool, error) {
 	return n > 0, err
 }
 func (s *Store) SoftDeleteMedia(ctx context.Context, id, owner string, now int64) error {
-	res, err := s.DB.ExecContext(ctx, `UPDATE media SET status='DELETING',deleted_at_ms=?,updated_at_ms=? WHERE id=? AND owner_user_id=? AND deleted_at_ms IS NULL`, now, now, id, owner)
+	res, err := s.DB.ExecContext(ctx, `UPDATE media SET status='DELETING',deleted_at_ms=?,updated_at_ms=? WHERE id=? AND owner_user_id=? AND deleted_at_ms IS NULL AND status!='UPLOADING' AND NOT EXISTS (SELECT 1 FROM rooms WHERE media_id=media.id AND status!='CLOSED')`, now, now, id, owner)
 	if err == nil {
 		n, _ := res.RowsAffected()
 		if n != 1 {

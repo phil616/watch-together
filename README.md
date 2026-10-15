@@ -1,6 +1,6 @@
 # 远程放映室
 
-> 注:项目采用开放注册和开放端口,建议再套一层零信任保护项目,避免流量被盗刷产生添加账单,七夕快乐
+> 账户由超级管理员统一创建，不开放自由注册；未登录的好友可以通过房间邀请链接以游客身份加入。
 
 远程放映室是一个可自行部署的异地同步观影应用。房主维护唯一公共播放时间线，成员从私有 S3-compatible 对象存储直接读取视频，Go 服务只传递权限、播放状态与实时房间消息。页面刷新或 WebSocket 重连后，客户端用完整 snapshot 恢复，不依赖补放历史事件。
 
@@ -18,11 +18,12 @@ Browser ── HTTPS Range/PUT ── S3-compatible private bucket
 
 ## 功能
 
-- 注册、Argon2id 密码、Opaque Cookie Session、游客邀请会话和 CSRF 防护
+- 单一超级管理员、受控账户创建、用户禁用与密码重置，Argon2id 密码、Opaque Cookie Session、游客邀请会话和 CSRF 防护
+- Mantine 管理中心：全站用户、房间和影片管理、搜索分页与资源概览；[账户管理说明](docs/ACCOUNT_MANAGEMENT.md)
 - 房间、邀请、房主转让、移除成员、房主断线宽限与在线成员
 - 房主离线后暂停并保留房间，返回时恢复；只有房主明确操作才永久关闭，历史误关闭房间会在升级时恢复一次
 - S3 单 PUT 与 32 MiB Multipart 直传、HeadObject 校验、私有播放票据
-- ArtPlayer 播放器、聊天记录与独立的强制实时广播、服务器时钟同步、revision、漂移纠正、缓冲协调
+- ArtPlayer 播放器、播放器内与侧栏同步的聊天输入、聊天记录与独立的强制实时广播、服务器时钟同步、revision、漂移纠正、缓冲协调
 - WebSocket snapshot、ACK、指数退避重连、有界发送队列和 16 KiB 限制
 - 纯文本房间广播：全体在线成员即时展示，暂停和无影片时仍可接收，按接收时间过期，拖动进度与重连不重放；消息栏保留记录，附 token-bucket 限流
 - SQLite migration、WAL、checkpoint、结构化 JSON 日志、健康检查和优雅关闭
@@ -55,6 +56,7 @@ git lfs pull
 最省事的方式是启动含 MinIO 的完整环境：
 
 ```bash
+# 先在 .env 设置 ADMIN_USERNAME、ADMIN_PASSWORD（至少 10 位）
 docker compose up --build
 ```
 
@@ -64,16 +66,22 @@ docker compose up --build
 
 ```bash
 cp .env.example .env
+# 编辑 .env，设置超级管理员和本地存储配置
 cd web && npm ci && npm run dev
 ```
 
 另一个终端导出 `.env` 中的变量后运行：
 
 ```bash
+set -a
+source .env
+set +a
 go run ./cmd/watchtogether serve
 ```
 
 Vite 在 `http://localhost:5173` 提供页面并代理 API。应用本身不会解析 `.env` 文件；生产环境应由 systemd、容器平台或 shell 注入环境变量，避免把 secrets 意外读入日志或提交到 Git。
+
+登录超级管理员后，点击顶部“管理后台”或打开 `/admin` 创建普通用户。详情及升级规则见[账户管理说明](docs/ACCOUNT_MANAGEMENT.md)。
 
 ## S3 配置
 
@@ -109,6 +117,8 @@ MinIO 版本对 bucket-level CORS API 的支持存在差异，本仓库的 Compo
 | `APP_BASE_URL` | 唯一公开 HTTPS origin，也是邀请链接前缀 |
 | `HTTP_LISTEN_ADDR` | 建议正式环境为 `127.0.0.1:8080` |
 | `DATABASE_PATH` | 本机可靠磁盘上的 SQLite 文件 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 仅首次初始化超级管理员，后续启动不覆盖已有账户 |
+| `ADMIN_NICKNAME` | 初始管理员昵称，默认“超级管理员” |
 | `SESSION_TTL` | 正式用户 session 生命周期，默认 720h |
 | `ROOM_MAX_MEMBERS` | 单房间上限，默认 20 |
 | `MAX_MEDIA_SIZE_BYTES` | 声明大小与 HeadObject 实际大小都会检查 |
@@ -134,6 +144,8 @@ make build
 watchtogether serve    启动 API、WebSocket 和 SPA
 watchtogether migrate  应用尚未执行的事务化 migration
 watchtogether doctor   检查数据库与对象存储配置
+watchtogether create-admin  使用环境变量初始化唯一超级管理员
+watchtogether reset-admin-password  在停止服务后重置管理员密码并撤销会话
 ```
 
 ## 正式部署
@@ -141,8 +153,8 @@ watchtogether doctor   检查数据库与对象存储配置
 容器部署时必须把 `/data` 挂载到持久卷。SQLite 不应放在 NFS、SMB 等共享网络文件系统上。
 
 ```bash
-docker build -t movie-sync:1.0.0 .
-docker run --env-file /etc/movie-sync.env -v movie-sync-data:/data -p 127.0.0.1:8080:8080 movie-sync:1.0.0
+docker build -t movie-sync:1.2.0 .
+docker run --env-file /etc/movie-sync.env -v movie-sync-data:/data -p 127.0.0.1:8080:8080 movie-sync:1.2.0
 ```
 
 Nginx/OpenResty TLS 终止示例见 [deploy/nginx.conf.example](deploy/nginx.conf.example)。WebSocket 路径必须透传 HTTP/1.1 `Upgrade` 与 `Connection`，公开页面、`/api/`、`/assets/` 必须使用同一 origin。外部仅暴露 443；Go 保持监听 loopback。
@@ -184,6 +196,8 @@ make test
 cd web && npx playwright install chromium
 cd .. && make e2e
 ```
+
+浏览器测试默认使用独立端口 `18081`、`data/e2e.db` 和专用管理员，账户通过受保护的管理 API 创建。`E2E_PORT` 可更改测试端口；测试外部实例时需设置 `PLAYWRIGHT_BASE_URL`、`E2E_ADMIN_USERNAME` 和 `E2E_ADMIN_PASSWORD`，不要指向生产数据。
 
 ## 常见故障
 

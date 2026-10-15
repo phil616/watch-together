@@ -14,6 +14,10 @@ const RoomPage = lazy(() =>
   import("./pages/RoomPage").then((m) => ({ default: m.RoomPage })),
 );
 
+const AdminPage = lazy(() =>
+  import("./pages/AdminPage").then((m) => ({ default: m.AdminPage })),
+);
+
 /** Application routes. */
 export default function App() {
   return (
@@ -26,7 +30,9 @@ export default function App() {
     >
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/:mode" element={<AuthPage />} />
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/register" element={<Navigate to="/login" replace />} />
+        <Route path="/admin" element={<AdminPage />} />
         <Route path="/join/:token" element={<InvitePage />} />
         <Route path="/room/:code" element={<RoomPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
