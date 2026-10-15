@@ -1,3 +1,21 @@
+import {
+  IconMessageCircle,
+  IconUsers,
+  IconSend,
+  IconArrowLeft,
+} from "@tabler/icons-react";
+import { confirmAction } from "../components/confirmAction";
+import {
+  Button,
+  TextInput,
+  NativeSelect,
+  Paper,
+  Alert,
+  Tabs,
+  Badge,
+  Avatar,
+  Text,
+} from "@mantine/core";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, json } from "../api/client";
@@ -252,7 +270,8 @@ export function RoomPage() {
         { method: "POST", body: json({ expiresInSeconds: 86400 }) },
       );
       setInvite(v.url);
-      await navigator.clipboard?.writeText(v.url);
+      // The selectable link remains available when clipboard permissions are denied.
+      await navigator.clipboard?.writeText(v.url).catch(() => {});
     } catch (e) {
       setError((e as Error).message);
     }
@@ -282,14 +301,29 @@ export function RoomPage() {
     }
   };
   const closeRoom = async () => {
-    if (!confirm("确定关闭房间？所有连接都将断开。")) return;
-    await api(`/api/v1/rooms/${room!.id}/close`, {
-      method: "POST",
-      body: "{}",
-    }).catch((e) => setError(e.message));
+    if (
+      !(await confirmAction(
+        "关闭房间",
+        "所有成员的连接都将断开。你可以稍后重新开放房间。",
+      ))
+    )
+      return;
+    try {
+      await api(`/api/v1/rooms/${room!.id}/close`, {
+        method: "POST",
+        body: "{}",
+      });
+      // A closed WebSocket can arrive before the final room event. Reflect
+      // the acknowledged action locally so reopening is immediately available.
+      setRoom((current) =>
+        current ? { ...current, status: "CLOSED" } : current,
+      );
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
   };
   const leaveRoom = async () => {
-    if (!confirm("确定离开放映室？再次进入需要新的邀请。")) return;
+    if (!(await confirmAction("离开放映室", "再次进入需要新的邀请。"))) return;
     try {
       await api(`/api/v1/rooms/${room!.id}/leave`, {
         method: "POST",
@@ -306,9 +340,14 @@ export function RoomPage() {
     <Layout wide>
       <div className="room-head">
         <div>
-          <button className="back-link" onClick={() => nav("/")}>
-            ← 返回首页
-          </button>
+          <Button
+            variant="subtle"
+            color="gray"
+            size="compact-xs"
+            onClick={() => nav("/")}
+          >
+            <IconArrowLeft size={14} /> 返回首页
+          </Button>
           <h1>{room?.title ?? "正在进入放映室"}</h1>
           <span className="room-code">房间 {room?.code}</span>
         </div>
@@ -332,37 +371,52 @@ export function RoomPage() {
                         : "连接中断"}
           </span>
           {room?.status === "CLOSED" && isHost && (
-            <button className="ghost" onClick={reopenRoom}>
+            <Button variant="default" onClick={reopenRoom}>
               重新开放房间
-            </button>
+            </Button>
           )}
           {isHost && (
-            <button className="ghost" onClick={createInvite}>
+            <Button variant="default" onClick={createInvite}>
               复制邀请链接
-            </button>
+            </Button>
           )}
           {isHost && (
-            <button className="danger ghost" onClick={closeRoom}>
+            <Button variant="light" color="red" onClick={closeRoom}>
               关闭房间
-            </button>
+            </Button>
           )}
           {!isHost && room && (
-            <button className="danger ghost" onClick={leaveRoom}>
+            <Button variant="light" color="red" onClick={leaveRoom}>
               离开房间
-            </button>
+            </Button>
           )}
         </div>
       </div>
       {invite && (
-        <div className="notice">
-          邀请链接已复制：<span>{invite}</span>
-        </div>
+        <Alert
+          color="teal"
+          title="邀请已准备好"
+          withCloseButton
+          onClose={() => setInvite("")}
+          mb="md"
+        >
+          <Text size="sm">把链接分享给朋友，一起进入放映室。</Text>
+          <Text component="a" href={invite} size="xs" className="invite-url">
+            {invite}
+          </Text>
+        </Alert>
       )}
       {error && (
-        <div className="error-box global-error">
+        <Alert
+          color="red"
+          title="房间提示"
+          role="alert"
+          withCloseButton
+          onClose={() => setError("")}
+          mb="md"
+        >
           {error}
-          <button onClick={() => setError("")}>×</button>
-        </div>
+        </Alert>
       )}
       <div className="room-grid">
         <div className="room-main">
@@ -385,12 +439,13 @@ export function RoomPage() {
             }}
           />
           {isHost && (
-            <section className="host-tools panel">
+            <Paper component="section" className="host-tools" p="md">
               <div>
                 <strong>当前影片</strong>
                 <span>{media?.originalFilename ?? "尚未选择"}</span>
               </div>
-              <select
+              <NativeSelect
+                className="media-selector"
                 aria-label="切换影片"
                 value={media?.id ?? ""}
                 onChange={(e) => changeMedia(e.target.value)}
@@ -403,162 +458,171 @@ export function RoomPage() {
                       {m.originalFilename}
                     </option>
                   ))}
-              </select>
-            </section>
+              </NativeSelect>
+            </Paper>
           )}
         </div>
-        <aside className={`room-side ${sidePanel}-panel`}>
-          <div className="side-tabs" role="tablist" aria-label="房间侧栏">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidePanel === "chat"}
-              aria-controls="room-chat-panel"
-              className={sidePanel === "chat" ? "active" : ""}
-              onClick={() => {
-                keepChatAtBottom.current = true;
-                setSidePanel("chat");
+        <Tabs
+          value={sidePanel}
+          onChange={(value) => {
+            keepChatAtBottom.current = true;
+            setSidePanel(value as SidePanel);
+          }}
+          keepMounted={false}
+          className={`room-side ${sidePanel}-panel`}
+        >
+          <Tabs.List grow className="side-tabs" aria-label="房间侧栏">
+            <Tabs.Tab
+              value="chat"
+              leftSection={<IconMessageCircle size={16} />}
+              rightSection={
+                <Badge size="xs" color="gray" variant="light">
+                  {messages.length}
+                </Badge>
+              }
+            >
+              聊天
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="members"
+              leftSection={<IconUsers size={16} />}
+              rightSection={
+                <Badge size="xs" color="gray" variant="light">
+                  {members.length}/{room?.maxMembers}
+                </Badge>
+              }
+            >
+              成员
+            </Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="chat" className="chat-panel">
+            <div
+              className="messages"
+              aria-label="聊天记录"
+              ref={messageListRef}
+              role="log"
+              aria-live="polite"
+              onScroll={(event) => {
+                const list = event.currentTarget;
+                keepChatAtBottom.current =
+                  list.scrollHeight - list.scrollTop - list.clientHeight < 80;
               }}
             >
-              聊天 <small>{messages.length}</small>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidePanel === "members"}
-              aria-controls="room-member-panel"
-              className={sidePanel === "members" ? "active" : ""}
-              onClick={() => setSidePanel("members")}
-            >
-              成员{" "}
-              <small>
-                {members.length}/{room?.maxMembers}
-              </small>
-            </button>
-          </div>
-          {sidePanel === "chat" ? (
-            <>
-              <div
-                className="messages"
-                id="room-chat-panel"
-                ref={messageListRef}
-                role="log"
-                aria-live="polite"
-                onScroll={(event) => {
-                  const list = event.currentTarget;
-                  keepChatAtBottom.current =
-                    list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-                }}
-              >
-                {messages.map((message) => {
-                  const own = message.senderId === identity.id;
-                  return (
-                    <article
-                      className={`message${own ? " own" : ""}`}
-                      key={message.id}
-                    >
-                      <div className="message-meta">
-                        <strong>{own ? "我" : message.senderNickname}</strong>
-                        <time
-                          className="message-time"
-                          dateTime={new Date(message.createdAtMs).toISOString()}
-                        >
-                          {new Date(message.createdAtMs).toLocaleTimeString(
-                            "zh-CN",
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              second: "2-digit",
-                            },
-                          )}
-                        </time>
-                      </div>
-                      <div className="message-bubble">
-                        <p>{message.content}</p>
-                      </div>
-                    </article>
-                  );
-                })}
-                {!messages.length && (
-                  <div className="empty-chat">
-                    放映厅很安静。
-                    <br />
-                    说点什么，消息也会飘过屏幕。
-                  </div>
-                )}
-              </div>
-              <form className="chat-form" onSubmit={sendChat}>
-                <input
-                  aria-label="聊天消息"
-                  name="message"
-                  maxLength={2000}
-                  autoComplete="off"
-                  placeholder={
-                    connection === "connected" ? "发送消息…" : "等待重新连接…"
-                  }
-                  disabled={connection !== "connected"}
-                />
-                <button
-                  aria-label="发送消息"
-                  disabled={connection !== "connected"}
-                >
-                  ↑
-                </button>
-              </form>
-            </>
-          ) : (
-            <div className="member-list" id="room-member-panel" role="tabpanel">
-              <h3>在线成员</h3>
-              {members.map((member) => (
-                <div className="member" key={member.id}>
-                  <span className="avatar">
-                    {member.nickname.slice(0, 1).toUpperCase()}
-                  </span>
-                  <div>
-                    <strong>{member.nickname}</strong>
-                    <small>
-                      {member.role === "host"
-                        ? "房主"
-                        : member.kind === "guest"
-                          ? "游客"
-                          : "成员"}{" "}
-                      · {member.ready ? "已就绪" : "加载中"}
-                    </small>
-                  </div>
-                  {member.online && <i />}
-                  {isHost &&
-                    member.id !== identity.id &&
-                    member.kind === "user" && (
-                      <button
-                        className="tiny"
-                        onClick={() =>
-                          api(`/api/v1/rooms/${room!.id}/transfer-host`, {
-                            method: "POST",
-                            body: json({ userId: member.id }),
-                          }).catch((cause) => setError(cause.message))
-                        }
+              {messages.map((message) => {
+                const own = message.senderId === identity.id;
+                return (
+                  <article
+                    className={`message${own ? " own" : ""}`}
+                    key={message.id}
+                  >
+                    <div className="message-meta">
+                      <strong>{own ? "我" : message.senderNickname}</strong>
+                      <time
+                        className="message-time"
+                        dateTime={new Date(message.createdAtMs).toISOString()}
                       >
-                        转让
-                      </button>
-                    )}
-                  {isHost && member.id !== identity.id && (
-                    <button
-                      className="tiny danger"
+                        {new Date(message.createdAtMs).toLocaleTimeString(
+                          "zh-CN",
+                          {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          },
+                        )}
+                      </time>
+                    </div>
+                    <div className="message-bubble">
+                      <p>{message.content}</p>
+                    </div>
+                  </article>
+                );
+              })}
+              {!messages.length && (
+                <div className="empty-chat">
+                  放映厅很安静。
+                  <br />
+                  说点什么，让朋友们在屏幕上看到。
+                </div>
+              )}
+            </div>
+            <form className="chat-form" onSubmit={sendChat}>
+              <TextInput
+                aria-label="聊天消息"
+                name="message"
+                maxLength={2000}
+                autoComplete="off"
+                placeholder={
+                  connection === "connected" ? "发送消息…" : "等待重新连接…"
+                }
+                disabled={connection !== "connected"}
+              />
+              <Button
+                type="submit"
+                aria-label="发送消息"
+                disabled={connection !== "connected"}
+              >
+                <IconSend size={18} />
+              </Button>
+            </form>
+          </Tabs.Panel>
+          <Tabs.Panel value="members" className="member-list">
+            <h3>在线成员</h3>
+            {members.map((member) => (
+              <div className="member" key={member.id}>
+                <Avatar
+                  size={34}
+                  radius="xl"
+                  color={member.role === "host" ? "amber" : "blue"}
+                >
+                  {member.nickname.slice(0, 1).toUpperCase()}
+                </Avatar>
+                <div>
+                  <strong>{member.nickname}</strong>
+                  <small>
+                    {member.role === "host"
+                      ? "房主"
+                      : member.kind === "guest"
+                        ? "游客"
+                        : "成员"}{" "}
+                    · {member.ready ? "已就绪" : "加载中"}
+                  </small>
+                </div>
+                {member.online && <i />}
+                {isHost &&
+                  member.id !== identity.id &&
+                  member.kind === "user" && (
+                    <Button
+                      variant="subtle"
+                      size="compact-xs"
                       onClick={() =>
-                        api(`/api/v1/rooms/${room!.id}/kick`, {
+                        api(`/api/v1/rooms/${room!.id}/transfer-host`, {
                           method: "POST",
                           body: json({ userId: member.id }),
                         }).catch((cause) => setError(cause.message))
                       }
                     >
-                      移除
-                    </button>
+                      转让
+                    </Button>
                   )}
-                </div>
-              ))}
-            </div>
-          )}
-        </aside>
+                {isHost && member.id !== identity.id && (
+                  <Button
+                    variant="subtle"
+                    color="red"
+                    size="compact-xs"
+                    onClick={() =>
+                      api(`/api/v1/rooms/${room!.id}/kick`, {
+                        method: "POST",
+                        body: json({ userId: member.id }),
+                      }).catch((cause) => setError(cause.message))
+                    }
+                  >
+                    移除
+                  </Button>
+                )}
+              </div>
+            ))}
+          </Tabs.Panel>
+        </Tabs>
       </div>
     </Layout>
   );

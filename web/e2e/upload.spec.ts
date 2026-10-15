@@ -88,7 +88,7 @@ for (const missingETag of [false, true]) {
       expect(completes).toBe(0);
     } else {
       await expect(page.getByText("上传完成", { exact: true })).toBeVisible();
-      await expect(page.locator(".media-card")).toContainText("READY");
+      await expect(page.locator(".media-card")).toContainText("可放映");
       expect(uploaded).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
       expect(completes).toBe(1);
       expect(aborts).toBe(0);

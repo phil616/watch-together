@@ -51,7 +51,7 @@ test("two browsers upload, join, synchronize, chat and recover state", async ({
   await host.goto("/register");
   await host.getByLabel("昵称").fill("Alice");
   await host.getByLabel("用户名").fill(`alice-${suffix}`);
-  await host.getByLabel("密码").fill("correct-horse-battery-staple");
+  await host.getByLabel(/^密码/).fill("correct-horse-battery-staple");
   await host.getByRole("button", { name: "注册并登录" }).click();
   await expect(host.getByText("今晚，看点什么？")).toBeVisible();
   const video = await syntheticVideo(host);
@@ -68,7 +68,7 @@ test("two browsers upload, join, synchronize, chat and recover state", async ({
   await host.getByLabel("切换影片").selectOption({ label: "sync-test.webm" });
   await expect(host.locator("video")).toBeVisible();
   await host.getByRole("button", { name: "复制邀请链接" }).click();
-  const inviteText = host.locator(".notice span");
+  const inviteText = host.locator(".invite-url");
   await expect(inviteText).toBeVisible();
   const invitation = (await inviteText.textContent())!;
   expect(invitation).toContain("/join/");
@@ -140,8 +140,11 @@ test("two browsers upload, join, synchronize, chat and recover state", async ({
       () => (globalThis as typeof globalThis & { pwned?: boolean }).pwned,
     ),
   ).toBeUndefined();
-  member.once("dialog", (dialog) => dialog.accept());
   await member.getByRole("button", { name: "离开房间" }).click();
+  await member
+    .getByRole("dialog")
+    .getByRole("button", { name: "确认操作" })
+    .click();
   await expect(member).toHaveURL(/\/login$/);
   await memberContext.close();
   await hostContext.close();

@@ -1,7 +1,7 @@
 {
   "name": "movie-sync-web",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,10 @@
     "test:player": "playwright test --config playwright.player.config.ts"
   },
   "dependencies": {
+    "@mantine/core": "9.7.2",
+    "@mantine/hooks": "9.7.2",
+    "@mantine/modals": "9.7.2",
+    "@tabler/icons-react": "3.49.0",
     "@vitejs/plugin-react": "latest",
     "artplayer": "5.4.0",
     "react": "latest",

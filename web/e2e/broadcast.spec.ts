@@ -45,7 +45,7 @@ test("room broadcasts reach everyone immediately and never follow the media time
   await host.goto("/register");
   await host.getByLabel("昵称").fill("广播回归");
   await host.getByLabel("用户名").fill(`broadcast-${Date.now()}`);
-  await host.getByLabel("密码").fill("local-broadcast-regression");
+  await host.getByLabel(/^密码/).fill("local-broadcast-regression");
   await host.getByRole("button", { name: "注册并登录" }).click();
   await host.locator("input[type=file]").setInputFiles({
     name: "broadcast.webm",
@@ -56,7 +56,7 @@ test("room broadcasts reach everyone immediately and never follow the media time
   await host.getByLabel("房间标题").fill("实时广播回归");
   await host.getByRole("button", { name: "创建并进入" }).click();
   await host.getByRole("button", { name: "复制邀请链接" }).click();
-  const invite = (await host.locator(".notice span").textContent())!;
+  const invite = (await host.locator(".invite-url").textContent())!;
   const memberContext = await browser.newContext({ reducedMotion: "reduce" });
   await memberContext.addInitScript(() => {
     localStorage.setItem("movie-sync:danmaku", "off");

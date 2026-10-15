@@ -26,6 +26,7 @@ Browser ── HTTPS Range/PUT ── S3-compatible private bucket
 - WebSocket snapshot、ACK、指数退避重连、有界发送队列和 16 KiB 限制
 - 纯文本房间广播：全体在线成员即时展示，暂停和无影片时仍可接收，按接收时间过期，拖动进度与重连不重放；消息栏保留记录，附 token-bucket 限流
 - SQLite migration、WAL、checkpoint、结构化 JSON 日志、健康检查和优雅关闭
+- Mantine 组件库与 Tabler 图标、深色影院主题、影片搜索、可访问的侧栏与确认弹窗；[UI 选型与设计](docs/UI_DESIGN.md)
 - 手机/平板/桌面响应式 React SPA、单二进制嵌入、Docker 与 Nginx 配置
 
 ## 依赖
