@@ -45,6 +45,9 @@ func TestChatValidationAndPlainTextPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if message.MediaPositionMs != nil {
+		t.Fatal("live room broadcasts must not be assigned a playback position")
+	}
 	if message.Content != content {
 		t.Fatalf("chat text changed: %q", message.Content)
 	}

@@ -2,7 +2,7 @@
 
 > 注:项目采用开放注册和开放端口,建议再套一层零信任保护项目,避免流量被盗刷产生添加账单,七夕快乐
 
-远程放映室是一个可自行部署的异地同步观影应用。房主维护唯一公共时间线，成员从私有 S3-compatible 对象存储直接读取视频，Go 服务只传递权限、播放状态与文字聊天。页面刷新或 WebSocket 重连后，客户端用完整 snapshot 恢复，不依赖补放历史事件。
+远程放映室是一个可自行部署的异地同步观影应用。房主维护唯一公共播放时间线，成员从私有 S3-compatible 对象存储直接读取视频，Go 服务只传递权限、播放状态与实时房间消息。页面刷新或 WebSocket 重连后，客户端用完整 snapshot 恢复，不依赖补放历史事件。
 
 ## 架构
 
@@ -22,9 +22,9 @@ Browser ── HTTPS Range/PUT ── S3-compatible private bucket
 - 房间、邀请、房主转让、移除成员、房主断线宽限与在线成员
 - 房主离线后暂停并保留房间，返回时恢复；只有房主明确操作才永久关闭，历史误关闭房间会在升级时恢复一次
 - S3 单 PUT 与 32 MiB Multipart 直传、HeadObject 校验、私有播放票据
-- 自定义 HTML5 播放器、聊天气泡与实时弹幕、服务器时钟同步、revision、漂移纠正、缓冲协调
+- ArtPlayer 播放器、聊天记录与独立的强制实时广播、服务器时钟同步、revision、漂移纠正、缓冲协调
 - WebSocket snapshot、ACK、指数退避重连、有界发送队列和 16 KiB 限制
-- 纯文本聊天、媒体时间点、历史记录和 token-bucket 限流
+- 纯文本房间广播：全体在线成员即时展示，暂停和无影片时仍可接收，按接收时间过期，拖动进度与重连不重放；消息栏保留记录，附 token-bucket 限流
 - SQLite migration、WAL、checkpoint、结构化 JSON 日志、健康检查和优雅关闭
 - 手机/平板/桌面响应式 React SPA、单二进制嵌入、Docker 与 Nginx 配置
 
@@ -166,6 +166,8 @@ S3 对象应通过 bucket versioning/lifecycle 单独保护。恢复时先停止
 - `GET /diagnostics`：仅 loopback 可访问，返回活跃房间与 WebSocket 数
 
 日志为一行一个 JSON 对象，带 HTTP/WebSocket request ID。密码、Cookie、session/invite token、S3 secret 和完整 presigned URL 永不写入日志。
+
+播放器选型、实时广播与影片时间轴的分离、同步适配边界及验证见 [播放器迁移说明](docs/PLAYER_MIGRATION.md)。
 
 ## 测试
 

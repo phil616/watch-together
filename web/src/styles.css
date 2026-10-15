@@ -775,7 +775,7 @@ select:focus {
   }
 }
 
-/* Responsive room experience and danmaku layer */
+/* Responsive room experience */
 html {
   color-scheme: dark;
   -webkit-text-size-adjust: 100%;
@@ -815,104 +815,6 @@ button {
 .controls > button,
 .controls > select {
   flex: 0 0 auto;
-}
-.danmaku-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  overflow: hidden;
-  pointer-events: none;
-  contain: layout paint;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 4%,
-    #000 96%,
-    transparent 100%
-  );
-}
-.danmaku-layer.enabled {
-  opacity: 1;
-}
-.danmaku-item {
-  position: absolute;
-  left: 100%;
-  display: inline-flex;
-  align-items: center;
-  max-width: min(70vw, 640px);
-  height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-left-color: var(--danmaku-accent);
-  border-radius: 999px;
-  background: rgba(7, 10, 15, 0.78);
-  box-shadow: 0 7px 25px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(8px);
-  color: #fff;
-  white-space: nowrap;
-  will-change: transform;
-  animation: danmaku-travel var(--danmaku-duration) linear var(--danmaku-delay)
-    both;
-}
-.danmaku-author {
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  max-width: 120px;
-  padding: 0 9px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--danmaku-accent);
-  font-size: 11px;
-  font-weight: 750;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-}
-.danmaku-content {
-  display: block;
-  max-width: min(52vw, 520px);
-  padding: 0 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 14px;
-  text-shadow: 0 1px 3px #000;
-}
-@keyframes danmaku-travel {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(var(--danmaku-travel), 0, 0);
-  }
-}
-.danmaku-toggle,
-.sync-status-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.danmaku-toggle span,
-.sync-status-toggle span {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: #252c36;
-  color: #929cab;
-  font-size: 10px;
-  font-weight: 800;
-}
-.danmaku-toggle.active,
-.sync-status-toggle.active {
-  border-color: rgba(245, 183, 59, 0.6);
-  color: #ffe0a0;
-  background: #242015;
-}
-.danmaku-toggle.active span,
-.sync-status-toggle.active span {
-  background: var(--accent);
-  color: #18130a;
 }
 .room-side {
   height: clamp(560px, calc(100dvh - 140px), 760px);
@@ -1173,18 +1075,6 @@ button {
     min-height: 40px;
     padding: 7px 9px;
   }
-  .danmaku-item {
-    height: 30px;
-  }
-  .danmaku-author {
-    padding: 0 7px;
-    font-size: 9px;
-  }
-  .danmaku-content {
-    max-width: 58vw;
-    padding: 0 9px;
-    font-size: 12px;
-  }
   .sync-pill {
     left: 8px;
     top: 8px;
@@ -1248,19 +1138,6 @@ button {
   }
   .volume {
     display: none;
-  }
-  .danmaku-toggle,
-  .sync-status-toggle {
-    width: 40px;
-    padding: 0 !important;
-    justify-content: center;
-    font-size: 0;
-  }
-  .danmaku-toggle span,
-  .sync-status-toggle span {
-    width: 23px;
-    height: 23px;
-    font-size: 10px;
   }
   .pip-button {
     display: none;
@@ -1373,11 +1250,125 @@ button {
   pointer-events: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .danmaku-layer {
-    display: none !important;
+/* ArtPlayer owns its controls and fullscreen canvas, isolated from room forms. */
+.artplayer-container {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+.third-party-player .art-video-player {
+  --art-theme: #e8b86d;
+}
+.third-party-player .art-video-player button {
+  font: inherit;
+}
+.third-party-player .art-bottom {
+  padding-left: max(10px, env(safe-area-inset-left));
+  padding-right: max(10px, env(safe-area-inset-right));
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.third-party-player .sync-pill {
+  z-index: 1;
+  opacity: 1;
+}
+.third-party-player .sync-pill:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.third-party-player .room-controls-hidden .sync-pill:not(.autoplay-blocked) {
+  opacity: 0;
+  pointer-events: none;
+}
+.room-member .art-control-playAndPause,
+.room-member .art-state,
+.room-member .art-setting-playbackRate {
+  display: none !important;
+}
+.room-member .art-progress {
+  pointer-events: none;
+}
+@media (max-width: 520px) {
+  .third-party-player .art-video-player {
+    --art-control-icon-size: 28px;
+    --art-control-icon-scale: 0.8;
   }
-  .danmaku-item {
-    animation: none !important;
+  .third-party-player .art-control-fullscreenWeb,
+  .third-party-player .art-control-pip {
+    display: none;
+  }
+}
+.room-member [data-name="playback-rate"] {
+  display: none !important;
+}
+.third-party-player .art-video-player:fullscreen,
+.third-party-player .art-video-player:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+}
+
+/* Live room broadcasts use receive-time expiry, independent of the media clock. */
+.room-broadcast-host {
+  position: absolute;
+  inset: 0;
+  /* ArtPlayer: video=10, poster=11, layers=40, play mask=50, controls=60.
+     Broadcasts must paint above media/masks while leaving controls on top. */
+  z-index: 55;
+  pointer-events: none;
+}
+.live-broadcasts {
+  position: absolute;
+  top: max(54px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(64px, env(safe-area-inset-bottom));
+  left: max(12px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.live-broadcast {
+  flex-shrink: 0;
+  max-width: min(85%, 42rem);
+  max-height: 100%;
+  overflow: hidden;
+  padding: 8px 12px;
+  border: 1px solid #ffffff30;
+  border-radius: 10px;
+  background: #080d16e8;
+  color: #fff;
+  font: 15px/1.5 sans-serif;
+  box-shadow: 0 3px 14px #0006;
+  animation: broadcast-arrival 140ms ease-out;
+}
+.live-broadcast strong {
+  display: block;
+  color: #ffd166;
+  font-size: 12px;
+}
+.live-broadcast span {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.message-time {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes broadcast-arrival {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-broadcast {
+    animation: none;
   }
 }

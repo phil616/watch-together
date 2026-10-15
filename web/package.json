@@ -1,7 +1,7 @@
 {
   "name": "movie-sync-web",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,10 +10,12 @@
     "test:watch": "vitest",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
-    "e2e": "npm run build && playwright test"
+    "e2e": "npm run build && playwright test",
+    "test:player": "playwright test --config playwright.player.config.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "artplayer": "5.4.0",
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",

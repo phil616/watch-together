@@ -38,13 +38,14 @@ export type Member = {
   ready: boolean;
 };
 
-/** Chat or danmaku message displayed in the room. */
+/** A server-broadcast room message; archived copies are only a sidebar log. */
 export type ChatMessage = {
   id: string;
   senderId: string;
   senderNickname: string;
   senderKind: string;
   content: string;
+  /** Legacy archive metadata. Never used to schedule or replay broadcasts. */
   mediaPositionMs?: number;
   createdAtMs: number;
 };

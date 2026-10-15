@@ -14,21 +14,11 @@ import type {
   PlaybackState,
   RoomSnapshot,
 } from "../realtime/protocol";
+import { RoomBroadcastStream } from "../realtime/RoomBroadcastStream";
 import type { ChatMessage, Media, Member, Room } from "../types";
 
 type SidePanel = "chat" | "members";
-const DANMAKU_PREFERENCE = "movie-sync:danmaku";
 const SYNC_STATUS_PREFERENCE = "movie-sync:sync-status";
-
-const initialDanmakuPreference = () => {
-  try {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
-      return false;
-    return window.localStorage.getItem(DANMAKU_PREFERENCE) !== "off";
-  } catch {
-    return true;
-  }
-};
 
 const initialSyncStatusPreference = () => {
   try {
@@ -38,11 +28,6 @@ const initialSyncStatusPreference = () => {
   }
 };
 
-const formatTime = (ms?: number) => {
-  if (ms === undefined) return "";
-  const t = Math.floor(ms / 1000);
-  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
-};
 /** Realtime room page: playback, chat, members, and host controls. */
 export function RoomPage() {
   const { code = "" } = useParams();
@@ -52,10 +37,6 @@ export function RoomPage() {
   const [playback, setPlayback] = useState<PlaybackState>();
   const [members, setMembers] = useState<Member[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [danmakuMessages, setDanmakuMessages] = useState<ChatMessage[]>([]);
-  const [danmakuEnabled, setDanmakuEnabled] = useState(
-    initialDanmakuPreference,
-  );
   const [syncStatusVisible, setSyncStatusVisible] = useState(
     initialSyncStatusPreference,
   );
@@ -69,10 +50,10 @@ export function RoomPage() {
   const [error, setError] = useState("");
   const [invite, setInvite] = useState("");
   const [library, setLibrary] = useState<Media[]>([]);
-  const danmakuEnabledRef = useRef(danmakuEnabled);
   const messageListRef = useRef<HTMLDivElement>(null);
   const keepChatAtBottom = useRef(true);
   const ws = useMemo(() => new WebSocketClient(code, setConnection), [code]);
+  const broadcasts = useMemo(() => new RoomBroadcastStream(), [ws]);
   const isHost = !!identity && room?.hostUserId === identity.id;
   const roomClosed = room?.status === "CLOSED";
   const controller = useMemo(
@@ -89,9 +70,6 @@ export function RoomPage() {
     if (connection !== "connected") controller.suspend();
   }, [connection, controller]);
   useEffect(() => {
-    danmakuEnabledRef.current = danmakuEnabled;
-  }, [danmakuEnabled]);
-  useEffect(() => {
     if (sidePanel !== "chat" || !keepChatAtBottom.current) return;
     const frame = requestAnimationFrame(() => {
       const list = messageListRef.current;
@@ -102,6 +80,7 @@ export function RoomPage() {
   useEffect(() => {
     if (!identity) return;
     setRoom(undefined);
+    setMessages([]);
     setConnection("connecting");
     api<{ room: Room; media?: Media }>(
       `/api/v1/rooms/${encodeURIComponent(code)}`,
@@ -150,9 +129,10 @@ export function RoomPage() {
         setPlayback((old) => (!old || p.revision > old.revision ? p : old));
       } else if (e.type === "event.chat.message") {
         const message = e.payload as ChatMessage;
-        setMessages((items) => [...items, message].slice(-300));
-        if (danmakuEnabledRef.current)
-          setDanmakuMessages((items) => [...items, message].slice(-48));
+        // Only live WebSocket deliveries enter the transient presentation path.
+        // The history API and playback snapshots never publish to this stream.
+        if (broadcasts.receive(message))
+          setMessages((items) => [...items, message].slice(-300));
       } else if (e.type === "event.room.member_joined") {
         const x = (
           e.payload as {
@@ -195,7 +175,7 @@ export function RoomPage() {
       unsubscribe();
       ws.disconnect();
     };
-  }, [identity, ws, controller, room?.id, roomClosed, code]);
+  }, [identity, ws, controller, room?.id, roomClosed, code, broadcasts]);
   useEffect(() => {
     const mediaId = playback?.mediaId ?? room?.mediaId;
     if (!mediaId || !identity) {
@@ -250,20 +230,6 @@ export function RoomPage() {
     } catch (e) {
       setError((e as Error).message);
     }
-  };
-  const toggleDanmaku = () => {
-    setDanmakuEnabled((current) => {
-      const next = !current;
-      danmakuEnabledRef.current = next;
-      if (!next) setDanmakuMessages([]);
-      try {
-        window.localStorage.setItem(DANMAKU_PREFERENCE, next ? "on" : "off");
-      } catch {
-        // Storage may be unavailable in privacy mode; the in-memory setting
-        // still remains valid for the current room visit.
-      }
-      return next;
-    });
   };
   const toggleSyncStatus = () => {
     setSyncStatusVisible((current) => {
@@ -407,10 +373,8 @@ export function RoomPage() {
             controller={controller}
             syncStatus={syncStatus}
             syncStatusVisible={syncStatusVisible}
-            danmakuMessages={danmakuMessages}
-            danmakuEnabled={danmakuEnabled}
+            broadcasts={broadcasts}
             onSyncStatusToggle={toggleSyncStatus}
-            onDanmakuToggle={toggleDanmaku}
             onMediaError={() => {
               if (pendingSrc) {
                 setSrc(pendingSrc);
@@ -495,17 +459,19 @@ export function RoomPage() {
                     >
                       <div className="message-meta">
                         <strong>{own ? "我" : message.senderNickname}</strong>
-                        {message.mediaPositionMs !== undefined && (
-                          <button
-                            className="timestamp"
-                            disabled={!isHost}
-                            onClick={() =>
-                              controller.onUserSeek(message.mediaPositionMs!)
-                            }
-                          >
-                            {formatTime(message.mediaPositionMs)}
-                          </button>
-                        )}
+                        <time
+                          className="message-time"
+                          dateTime={new Date(message.createdAtMs).toISOString()}
+                        >
+                          {new Date(message.createdAtMs).toLocaleTimeString(
+                            "zh-CN",
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            },
+                          )}
+                        </time>
                       </div>
                       <div className="message-bubble">
                         <p>{message.content}</p>

@@ -1,19 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import Artplayer from "artplayer";
+import { createPortal } from "react-dom";
+import { LiveBroadcastOverlay } from "./LiveBroadcastOverlay";
+import type { RoomBroadcastStream } from "../realtime/RoomBroadcastStream";
+import { connectPlayer } from "../player/PlayerAdapter";
 import type { PlaybackState } from "../realtime/protocol";
-import type { ChatMessage } from "../types";
 import type { SyncController, SyncStatus } from "../player/SyncController";
-import { DanmakuOverlay } from "./DanmakuOverlay";
-
-/** Format milliseconds as `m:ss` or `h:mm:ss`. */
-const format = (ms: number) => {
-  const total = Math.max(0, Math.floor(ms / 1000)),
-    h = Math.floor(total / 3600),
-    m = Math.floor((total % 3600) / 60),
-    s = total % 60;
-  return h
-    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-    : `${m}:${String(s).padStart(2, "0")}`;
-};
 
 type WebKitFullscreenDocument = Document & {
   webkitFullscreenElement?: Element | null;
@@ -83,7 +75,6 @@ export async function togglePlayerFullscreen(
   }
 }
 
-/** Player controls, video element, danmaku overlay, and sync status pill. */
 export function VideoPlayer({
   src,
   state,
@@ -91,10 +82,8 @@ export function VideoPlayer({
   controller,
   syncStatus,
   syncStatusVisible,
-  danmakuMessages,
-  danmakuEnabled,
+  broadcasts,
   onSyncStatusToggle,
-  onDanmakuToggle,
   onMediaError,
 }: {
   src?: string;
@@ -103,76 +92,105 @@ export function VideoPlayer({
   controller: SyncController;
   syncStatus: SyncStatus;
   syncStatusVisible: boolean;
-  danmakuMessages: ChatMessage[];
-  danmakuEnabled: boolean;
+  broadcasts: RoomBroadcastStream;
   onSyncStatusToggle: () => void;
-  onDanmakuToggle: () => void;
   onMediaError?: () => void;
 }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  const playerRef = useRef<HTMLElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const revealControls = useCallback(() => {
-    clearTimeout(hideTimer.current);
-    setControlsVisible(true);
-    if (isFullscreen) {
-      hideTimer.current = setTimeout(() => {
-        // Keyboard users must not lose the control they are operating.
-        if (controlsRef.current?.querySelector(":focus-visible")) return;
-        setControlsVisible(false);
-      }, 3000);
+  const container = useRef<HTMLDivElement>(null);
+  const player = useRef<Artplayer | null>(null);
+  const placeholder = useRef<HTMLDivElement>(null);
+  // Keep one portal target for the lifetime of this room view. Moving it between
+  // player roots preserves active broadcasts when media elements are recreated.
+  const broadcastHost = useMemo(() => {
+    const host = document.createElement("div");
+    host.className = "room-broadcast-host";
+    return host;
+  }, []);
+  const latest = useRef({
+    onMediaError,
+    onSyncStatusToggle,
+  });
+  latest.current = {
+    onMediaError,
+    onSyncStatusToggle,
+  };
+  useEffect(() => {
+    if (!src || !container.current) {
+      placeholder.current?.appendChild(broadcastHost);
+      return;
     }
-  }, [isFullscreen]);
-  useEffect(() => {
-    const updateFullscreen = () => {
-      const doc = document as WebKitFullscreenDocument;
-      setIsFullscreen(
-        (doc.fullscreenElement || doc.webkitFullscreenElement) ===
-          playerRef.current,
-      );
-    };
-    document.addEventListener("fullscreenchange", updateFullscreen);
-    document.addEventListener("webkitfullscreenchange", updateFullscreen);
-    updateFullscreen();
+    const art = new Artplayer({
+      container: container.current,
+      url: src,
+      lang: "zh-cn",
+      autoplay: false,
+      autoPlayback: false,
+      mutex: false,
+      hotkey: true,
+      gesture: true,
+      setting: true,
+      playbackRate: true,
+      pip: true,
+      fullscreen: true,
+      fullscreenWeb: false,
+      playsInline: true,
+      controls: [
+        {
+          name: "room-sync",
+          position: "right",
+          html: "同步",
+          tooltip: "显示/隐藏同步状态",
+          click: () => latest.current.onSyncStatusToggle(),
+        },
+        {
+          name: "room-fullscreen",
+          position: "right",
+          html: "全屏",
+          tooltip: "全屏",
+          click: () => {
+            void togglePlayerFullscreen(art.template.$player, art.video);
+          },
+        },
+      ],
+    });
+    art.template.$player.classList.add("room-player");
+    art.template.$player.appendChild(broadcastHost);
+    // Remove the duplicate native fullscreen button through the component API,
+    // rather than relying on CSS specificity against injected plugin styles.
+    art.controls.remove("fullscreen");
+    for (const name of ["room-sync", "room-fullscreen"]) {
+      const control = art.controls[name] as HTMLElement;
+      control.setAttribute("role", "button");
+      control.tabIndex = 0;
+      control.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          control.click();
+        }
+      });
+    }
+    player.current = art;
+    const disconnect = connectPlayer(art.video, controller);
+    art.on("video:error", () => latest.current.onMediaError?.());
+    art.on("control", (visible) => {
+      art.template.$player.classList.toggle("room-controls-hidden", !visible);
+    });
     return () => {
-      document.removeEventListener("fullscreenchange", updateFullscreen);
-      document.removeEventListener("webkitfullscreenchange", updateFullscreen);
+      broadcastHost.remove();
+      player.current = null;
+      disconnect();
+      art.destroy();
     };
-  }, []);
-  useEffect(() => {
-    revealControls();
-    return () => clearTimeout(hideTimer.current);
-  }, [revealControls]);
-  const [current, setCurrent] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [scrub, setScrub] = useState<number>();
-  useEffect(() => {
-    if (!ref.current) return;
-    controller.attach(ref.current);
-    return () => controller.destroy();
-  }, [controller, src]);
-  useEffect(() => {
-    const id = setInterval(
-      () => setCurrent((ref.current?.currentTime ?? 0) * 1000),
-      250,
-    );
-    return () => clearInterval(id);
-  }, []);
+    // Toggle/settings updates must not recreate the video or reset its timeline.
+  }, [src, controller, broadcastHost]);
   useEffect(() => {
     if (state) controller.setRoomState(state);
-  }, [state, controller]);
-  const duration =
-    state?.durationMs || (ref.current?.duration ?? 0) * 1000 || 0;
-  const toggle = () => {
-    if (!ref.current) return;
-    if (state?.phase === "playing") controller.onUserPause().catch(() => {});
-    else controller.onUserPlay().catch(() => {});
-  };
+  }, [state, controller, src]);
+  useEffect(() => {
+    const art = player.current;
+    if (!art) return;
+    art.template.$player.classList.toggle("room-member", !isHost);
+  }, [isHost, src, controller]);
   const statusText =
     syncStatus === "synced"
       ? "● 已同步"
@@ -183,159 +201,38 @@ export function VideoPlayer({
           : syncStatus === "host-buffering"
             ? "房主缓冲中，等待统一恢复……"
             : "浏览器阻止了自动播放，点击继续";
+  useEffect(() => {
+    const art = player.current;
+    if (!art) return;
+    art.controls["room-sync"]?.setAttribute(
+      "aria-pressed",
+      String(syncStatusVisible),
+    );
+    if (art.layers["room-status"]) art.layers.remove("room-status");
+    if (syncStatus !== "autoplay-blocked" && !syncStatusVisible) return;
+    const button = document.createElement("button");
+    button.className = `sync-pill ${syncStatus}`;
+    button.textContent = statusText;
+    button.onclick = () => controller.resumeLocal();
+    button.disabled = syncStatus !== "autoplay-blocked";
+    art.layers.add({ name: "room-status", html: button });
+  }, [syncStatus, syncStatusVisible, statusText, src, controller]);
   return (
-    <section
-      className={`player-card${isFullscreen ? " is-fullscreen" : ""}${isFullscreen && !controlsVisible ? " controls-hidden" : ""}`}
-      ref={playerRef}
-      onPointerMove={(event) => {
-        if (event.pointerType !== "touch" && !event.buttons) revealControls();
-      }}
-      onPointerDown={(event) => {
-        revealControls();
-        if (controlsRef.current?.contains(event.target as Node))
-          clearTimeout(hideTimer.current);
-      }}
-      onPointerUp={revealControls}
-      onPointerCancel={revealControls}
-      onKeyDown={revealControls}
-      onFocus={revealControls}
-      onBlur={revealControls}
-    >
-      <div className="video-stage">
-        {src ? (
-          <video
-            ref={ref}
-            src={src}
-            preload="metadata"
-            playsInline
-            onError={onMediaError}
-          />
-        ) : (
+    <section className="player-card third-party-player">
+      {src ? (
+        <div ref={container} className="artplayer-container" />
+      ) : (
+        <div className="video-stage" ref={placeholder}>
           <div className="empty-player">
             <span className="empty-glyph">▶</span>
             <p>等待房主选择影片</p>
           </div>
-        )}
-        <DanmakuOverlay messages={danmakuMessages} enabled={danmakuEnabled} />
-        {syncStatus === "autoplay-blocked" ? (
-          <button
-            className={`sync-pill ${syncStatus}`}
-            onClick={() => controller.resumeLocal()}
-          >
-            {statusText}
-          </button>
-        ) : syncStatusVisible ? (
-          <div className={`sync-pill ${syncStatus}`}>{statusText}</div>
-        ) : null}
-      </div>
-      <div className="controls" ref={controlsRef}>
-        {isHost && (
-          <button
-            className="control-main"
-            onClick={toggle}
-            aria-label={state?.phase === "playing" ? "暂停" : "播放"}
-          >
-            {state?.phase === "playing" ? "Ⅱ" : "▶"}
-          </button>
-        )}
-        <span className="timecode">
-          {format(scrub ?? current)} / {format(duration)}
-        </span>
-        {isHost && (
-          <input
-            aria-label="播放进度"
-            className="timeline"
-            type="range"
-            min={0}
-            max={Math.max(duration, 1)}
-            step={100}
-            value={scrub ?? current}
-            onChange={(e) => setScrub(Number(e.target.value))}
-            onPointerUp={() => {
-              if (scrub !== undefined)
-                controller.onUserSeek(scrub).finally(() => setScrub(undefined));
-            }}
-            onKeyUp={(e) => {
-              if (
-                ["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) &&
-                scrub !== undefined
-              )
-                controller.onUserSeek(scrub).finally(() => setScrub(undefined));
-            }}
-          />
-        )}
-        <label className="volume">
-          <span>音量</span>
-          <input
-            aria-label="音量"
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={volume}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setVolume(v);
-              if (ref.current) ref.current.volume = v;
-            }}
-          />
-        </label>
-        {isHost && (
-          <select
-            aria-label="公共播放倍速"
-            value={state?.playbackRate ?? 1}
-            onChange={(e) =>
-              controller.onUserRateChange(Number(e.target.value))
-            }
-          >
-            {[0.5, 0.75, 1, 1.25, 1.5, 2].map((v) => (
-              <option key={v} value={v}>
-                {v}×
-              </option>
-            ))}
-          </select>
-        )}
-        <button
-          className={`ghost small danmaku-toggle${danmakuEnabled ? " active" : ""}`}
-          type="button"
-          aria-label={danmakuEnabled ? "关闭弹幕" : "开启弹幕"}
-          aria-pressed={danmakuEnabled}
-          onClick={onDanmakuToggle}
-        >
-          <span aria-hidden="true">弹</span>
-          {danmakuEnabled ? "弹幕开" : "弹幕关"}
-        </button>
-        <button
-          className={`ghost small sync-status-toggle${syncStatusVisible ? " active" : ""}`}
-          type="button"
-          aria-label={syncStatusVisible ? "隐藏同步状态" : "显示同步状态"}
-          aria-pressed={syncStatusVisible}
-          onClick={onSyncStatusToggle}
-        >
-          <span aria-hidden="true">同</span>
-          {syncStatusVisible ? "同步状态开" : "同步状态关"}
-        </button>
-        <button
-          className="ghost small pip-button"
-          type="button"
-          onClick={() => ref.current?.requestPictureInPicture?.()}
-          aria-label="画中画"
-        >
-          PiP
-        </button>
-        <button
-          className="ghost small fullscreen-button"
-          type="button"
-          onClick={() => {
-            if (playerRef.current)
-              void togglePlayerFullscreen(playerRef.current, ref.current);
-          }}
-          aria-label={isFullscreen ? "退出全屏" : "全屏"}
-          aria-pressed={isFullscreen}
-        >
-          {isFullscreen ? "退出全屏" : "全屏"}
-        </button>
-      </div>
+        </div>
+      )}
+      {createPortal(
+        <LiveBroadcastOverlay stream={broadcasts} />,
+        broadcastHost,
+      )}
     </section>
   );
 }

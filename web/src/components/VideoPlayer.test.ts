@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
+import { RoomBroadcastStream } from "../realtime/RoomBroadcastStream";
 import type { SyncController } from "../player/SyncController";
 import { VideoPlayer, togglePlayerFullscreen } from "./VideoPlayer";
 
@@ -67,70 +68,20 @@ describe("togglePlayerFullscreen", () => {
   });
 });
 
-describe("fullscreen controls", () => {
-  function mountPlayer() {
-    vi.useFakeTimers();
-    const result = render(
+describe("player placeholder", () => {
+  it("waits for a source without attaching the synchronizer", () => {
+    const attach = vi.fn();
+    const { getByText } = render(
       createElement(VideoPlayer, {
         isHost: true,
-        controller: { destroy: vi.fn() } as unknown as SyncController,
+        controller: { attach } as unknown as SyncController,
         syncStatus: "synced",
         syncStatusVisible: true,
-        danmakuMessages: [],
-        danmakuEnabled: false,
+        broadcasts: new RoomBroadcastStream(),
         onSyncStatusToggle: vi.fn(),
-        onDanmakuToggle: vi.fn(),
       }),
     );
-    const player = result.container.querySelector("section")!;
-    return { ...result, player };
-  }
-  function fullscreen(element: Element | null, webkit = false) {
-    Object.defineProperty(
-      document,
-      webkit ? "webkitFullscreenElement" : "fullscreenElement",
-      {
-        configurable: true,
-        value: element,
-      },
-    );
-    fireEvent(
-      document,
-      new Event(webkit ? "webkitfullscreenchange" : "fullscreenchange"),
-    );
-  }
-  it.each([false, true])(
-    "hides idle controls, wakes on touch and restores on exit (webkit=%s)",
-    (webkit) => {
-      const { player, getByRole } = mountPlayer();
-      act(() => vi.advanceTimersByTime(3500));
-      expect(player.classList.contains("controls-hidden")).toBe(false);
-      fullscreen(player, webkit);
-      expect(getByRole("button", { name: "退出全屏" })).toBeTruthy();
-      act(() => vi.advanceTimersByTime(3000));
-      expect(player.classList.contains("controls-hidden")).toBe(true);
-      fireEvent.pointerDown(player.querySelector(".video-stage")!);
-      expect(player.classList.contains("controls-hidden")).toBe(false);
-      act(() => vi.advanceTimersByTime(3000));
-      expect(player.classList.contains("controls-hidden")).toBe(true);
-      fullscreen(null, webkit);
-      expect(player.classList.contains("controls-hidden")).toBe(false);
-      expect(getByRole("button", { name: "全屏" })).toBeTruthy();
-    },
-  );
-  it("keeps keyboard controls visible and does not activate for another fullscreen element", () => {
-    const { player, getByRole } = mountPlayer();
-    fullscreen(document.body);
-    expect(player.classList.contains("is-fullscreen")).toBe(false);
-    fullscreen(player);
-    act(() => getByRole("button", { name: "退出全屏" }).focus());
-    act(() => vi.advanceTimersByTime(3500));
-    expect(player.classList.contains("controls-hidden")).toBe(false);
-  });
-  it("cleans up the idle timer on unmount", () => {
-    const { player, unmount } = mountPlayer();
-    fullscreen(player);
-    unmount();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getByText("等待房主选择影片")).toBeTruthy();
+    expect(attach).not.toHaveBeenCalled();
   });
 });

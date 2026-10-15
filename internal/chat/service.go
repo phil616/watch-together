@@ -42,17 +42,11 @@ func (s *Service) Send(ctx context.Context, roomID string, i model.Identity, con
 	if err != nil {
 		return model.ChatMessage{}, err
 	}
-	snap := actor.Snapshot(ctx)
-	var position *int64
-	if p, ok := snap["playback"].(rooms.PlaybackState); ok {
-		v := p.Expected(s.Now().UnixMilli())
-		position = &v
-	}
 	kind := "user"
 	if i.Guest {
 		kind = "guest"
 	}
-	m := model.ChatMessage{ID: uuid.NewString(), RoomID: room.ID, SenderID: i.ID, SenderNickname: i.Nickname, SenderKind: kind, Content: content, MediaPositionMs: position, CreatedAtMs: s.Now().UnixMilli()}
+	m := model.ChatMessage{ID: uuid.NewString(), RoomID: room.ID, SenderID: i.ID, SenderNickname: i.Nickname, SenderKind: kind, Content: content, CreatedAtMs: s.Now().UnixMilli()}
 	if err = s.Store.SaveChat(ctx, m); err != nil {
 		return model.ChatMessage{}, err
 	}

@@ -32,7 +32,7 @@ async function syntheticVideo(page: import("@playwright/test").Page) {
       draw.font = "28px sans-serif";
       draw.fillText("Remote Screening Room", 76, 100);
     }, 60);
-    await new Promise((r) => setTimeout(r, 4000));
+    await new Promise((r) => setTimeout(r, 8000));
     clearInterval(timer);
     recorder.stop();
     return stopped;
@@ -81,7 +81,7 @@ test("two browsers upload, join, synchronize, chat and recover state", async ({
   await member.getByRole("tab", { name: /成员/ }).click();
   await expect(member.locator(".member").getByText("Alice")).toBeVisible();
   await member.getByRole("tab", { name: /聊天/ }).click();
-  await host.getByRole("button", { name: "播放" }).click();
+  await host.locator(".art-control-playAndPause").click();
   const continueButton = member.getByRole("button", {
     name: /浏览器阻止了自动播放/,
   });
@@ -95,15 +95,17 @@ test("two browsers upload, join, synchronize, chat and recover state", async ({
       .evaluate((v) => (v as HTMLVideoElement).currentTime),
   ]);
   expect(Math.abs(hostTime - memberTime)).toBeLessThan(0.9);
-  await host.getByRole("button", { name: "暂停" }).click();
+  await host.locator(".art-control-playAndPause").click();
   await expect
     .poll(() =>
       member.locator("video").evaluate((v) => (v as HTMLVideoElement).paused),
     )
     .toBe(true);
-  const timeline = host.getByLabel("播放进度");
-  await timeline.fill("2000");
-  await timeline.dispatchEvent("pointerup");
+  const timeline = host.locator(".art-progress");
+  const bounds = (await timeline.boundingBox())!;
+  await timeline.click({
+    position: { x: bounds.width * 0.6, y: bounds.height / 2 },
+  });
   await expect
     .poll(() =>
       member
@@ -111,14 +113,18 @@ test("two browsers upload, join, synchronize, chat and recover state", async ({
         .evaluate((v) => (v as HTMLVideoElement).currentTime),
     )
     .toBeGreaterThan(1.5);
+  await host.locator(".art-control-playAndPause").click();
   await host.getByPlaceholder("发送消息…").fill("同步收到这条消息");
   await host.getByRole("button", { name: "发送消息" }).click();
   await expect(
     member.locator(".message-bubble").getByText("同步收到这条消息"),
   ).toBeVisible();
   await expect(
-    member.locator(".danmaku-content").getByText("同步收到这条消息"),
-  ).toBeAttached();
+    member
+      .locator(".live-broadcasts")
+      .getByText("同步收到这条消息", { exact: false })
+      .first(),
+  ).toBeVisible();
   await member.reload();
   await expect(member.getByText("实时连接")).toBeVisible();
   await expect(
